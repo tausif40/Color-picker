@@ -15,7 +15,7 @@ Screen colors are opaque, so HEXA ends in `FF` and HSLA has alpha `1`. The reque
 The custom picker uses a live screen stream, so you pick from the current screen rather than a frozen screenshot. macOS needs **Screen Recording** permission for this zoom preview; the app opens the relevant System Settings page from its permission notice. Until permission is available, the system eyedropper remains usable. The temporary picker windows close when you pick, cancel, or after one minute. Prism Pick remains available through the menu bar or system tray after its main window is closed. Colors and the shortcut are stored locally in the app's user data directory.
 
 ## Build the app
-
+ 
 Install dependencies once from the project folder:
 
 ```sh
