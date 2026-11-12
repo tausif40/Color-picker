@@ -6,7 +6,7 @@ function on(channel, callback) {
   return () => ipcRenderer.removeListener(channel, listener);
 }
 
-contextBridge.exposeInMainWorld('prism', {
+contextBridge.exposeInMainWorld('colorPicker', {
   platform: process.platform,
   getState: () => ipcRenderer.invoke('state:get'),
   startPicker: () => ipcRenderer.invoke('picker:start'),
@@ -20,6 +20,8 @@ contextBridge.exposeInMainWorld('prism', {
   copy: value => ipcRenderer.invoke('clipboard:write', value),
   closePopup: () => ipcRenderer.invoke('window:closePopup'),
   openScreenSettings: () => ipcRenderer.invoke('screen:settings'),
+  relaunch: () => ipcRenderer.invoke('app:relaunch'),
+  setTheme: theme => ipcRenderer.invoke('theme:set', theme),
   onState: callback => on('state:changed', callback),
   onPickerError: callback => on('picker:error', callback)
 });

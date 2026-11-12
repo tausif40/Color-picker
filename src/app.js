@@ -5,11 +5,11 @@ let activeView = 'picker';
 let shortcutDraftDirty = false;
 let toastTimer;
 
-document.body.classList.toggle('mac', window.prism.platform === 'darwin');
+document.body.classList.toggle('mac', window.colorPicker.platform === 'darwin');
 $('#shortcut-input').placeholder = 'Press your shortcut';
 
 function shortcutLabel(accelerator) {
-  const mac = window.prism.platform === 'darwin';
+  const mac = window.colorPicker.platform === 'darwin';
   return accelerator.replaceAll('CommandOrControl', mac ? '⌘' : 'Ctrl')
     .replaceAll('Command', mac ? '⌘' : 'Win')
     .replaceAll('Control', 'Ctrl').replaceAll('Alt', mac ? '⌥' : 'Alt')
@@ -18,7 +18,7 @@ function shortcutLabel(accelerator) {
 }
 
 function shortcutInputLabel(accelerator) {
-  const mac = window.prism.platform === 'darwin';
+  const mac = window.colorPicker.platform === 'darwin';
   return accelerator.replaceAll('CommandOrControl', mac ? 'Cmd' : 'Ctrl')
     .replaceAll('Command', 'Cmd').replaceAll('Control', 'Ctrl')
     .replaceAll('Option', mac ? 'Option' : 'Alt').replaceAll('Alt', mac ? 'Option' : 'Alt')
@@ -32,9 +32,9 @@ function pressedShortcut(event) {
     : event.key === ' ' ? 'Space' : event.key.length === 1 ? event.key.toUpperCase() : event.key;
   if (!/^(?:[A-Z0-9]|F(?:[1-9]|1\d|2[0-4])|Space|Enter|Tab|Backspace|Escape|ArrowUp|ArrowDown|ArrowLeft|ArrowRight)$/.test(key)) return null;
   const parts = [];
-  if (event.metaKey) parts.push(window.prism.platform === 'darwin' ? 'Cmd' : 'Win');
+  if (event.metaKey) parts.push(window.colorPicker.platform === 'darwin' ? 'Cmd' : 'Win');
   if (event.ctrlKey) parts.push('Ctrl');
-  if (event.altKey) parts.push(window.prism.platform === 'darwin' ? 'Option' : 'Alt');
+  if (event.altKey) parts.push(window.colorPicker.platform === 'darwin' ? 'Option' : 'Alt');
   if (event.shiftKey) parts.push('Shift');
   parts.push(key.replace(/^Arrow/, ''));
   return parts.join('+');
@@ -48,18 +48,23 @@ function toast(message) {
   toastTimer = setTimeout(() => item.classList.remove('visible'), 2200);
 }
 
+function icon(name, className = '') {
+  return `<svg class="icon ${className}" aria-hidden="true"><use href="#i-${name}"/></svg>`;
+}
+
+// Copy, then briefly swap the button's copy icon for a green check.
 async function copy(value, button) {
-  const result = await window.prism.copy(value);
+  const result = await window.colorPicker.copy(value);
   if (!result.ok || !button) return;
-  const icon = button.querySelector('.copy-icon') || button;
-  icon.textContent = '✓';
+  const use = button.querySelector('.copy-icon use');
+  use?.setAttribute('href', '#i-check');
   button.classList.add('copied');
   clearTimeout(button.copyTimer);
   button.copyTimer = setTimeout(() => {
     if (!button.isConnected) return;
-    icon.textContent = '⧉';
+    use?.setAttribute('href', '#i-copy');
     button.classList.remove('copied');
-  }, 1800);
+  }, 1600);
 }
 
 function setView(view) {
@@ -74,11 +79,11 @@ function renderFormats() {
   list.replaceChildren();
   for (const item of color.formats(appState.selected)) {
     const row = document.createElement('button');
-    row.className = 'code-card';
+    row.className = 'code-row';
     row.title = `Copy ${item.label}`;
-    row.innerHTML = '<span class="code-label"></span><strong></strong><span class="copy-icon">⧉</span>';
+    row.innerHTML = `<span class="code-label"></span><span class="code-value"></span>${icon('copy', 'copy-icon')}`;
     row.querySelector('.code-label').textContent = item.label;
-    row.querySelector('strong').textContent = item.value;
+    row.querySelector('.code-value').textContent = item.value;
     row.addEventListener('click', () => copy(item.value, row));
     list.append(row);
   }
@@ -95,7 +100,7 @@ function renderTones() {
     button.innerHTML = '<span class="tone-color"></span><small></small>';
     button.querySelector('.tone-color').style.background = hex;
     button.querySelector('small').textContent = hex.slice(1);
-    button.addEventListener('click', async () => { await window.prism.selectShade(hex); await copy(hex); });
+    button.addEventListener('click', () => window.colorPicker.selectShade(hex));
     list.append(button);
   }
 }
@@ -110,37 +115,38 @@ function renderRecent() {
     list.append(empty);
     return;
   }
-  for (const hex of appState.recent.slice(0, 8)) {
+  for (const hex of appState.recent.slice(0, 12)) {
     const button = document.createElement('button');
     button.className = 'recent-color';
     button.style.background = hex;
     button.title = `Select ${hex}`;
     button.setAttribute('aria-label', `Select ${hex}`);
-    button.addEventListener('click', () => window.prism.selectColor(hex));
+    button.addEventListener('click', () => window.colorPicker.selectColor(hex));
     list.append(button);
   }
 }
 
 function renderPalette() {
-  $('#palette-count').textContent = appState.palette.length;
+  $('#palette-total').textContent = appState.palette.length;
   const grid = $('#palette-grid');
   grid.replaceChildren();
   if (!appState.palette.length) {
     const empty = document.createElement('div');
     empty.className = 'palette-empty';
-    empty.innerHTML = '<span>◉</span><strong>No saved colors yet</strong><p>Pick a color and press ＋ to keep it here.</p>';
+    empty.innerHTML = `<span class="empty-icon">${icon('palette')}</span><strong>No saved colors yet</strong><p>Pick a color, then use the bookmark button to keep it here.</p>`;
     grid.append(empty);
     return;
   }
   for (const hex of appState.palette) {
     const card = document.createElement('article');
     card.className = 'palette-card';
-    card.innerHTML = '<button class="palette-swatch" title="Select color"></button><div class="palette-details"><strong></strong><div><button class="palette-copy" title="Copy HEX" aria-label="Copy HEX">⧉</button><button class="palette-remove" title="Remove color" aria-label="Remove color">×</button></div></div>';
+    card.innerHTML = `<button class="palette-swatch" title="Use this color"></button><div class="palette-actions"><button class="palette-copy" title="Copy HEX" aria-label="Copy HEX">${icon('copy', 'copy-icon')}</button><button class="palette-remove" title="Remove color" aria-label="Remove color">${icon('trash')}</button></div><div class="palette-details"><strong></strong></div>`;
     card.querySelector('.palette-swatch').style.background = hex;
     card.querySelector('strong').textContent = hex;
-    card.querySelector('.palette-swatch').addEventListener('click', () => { window.prism.selectColor(hex); setView('picker'); });
+    card.querySelector('.palette-swatch').setAttribute('aria-label', `Use ${hex}`);
+    card.querySelector('.palette-swatch').addEventListener('click', () => { window.colorPicker.selectColor(hex); setView('picker'); });
     card.querySelector('.palette-copy').addEventListener('click', event => copy(hex, event.currentTarget));
-    card.querySelector('.palette-remove').addEventListener('click', () => window.prism.removeColor(hex));
+    card.querySelector('.palette-remove').addEventListener('click', () => window.colorPicker.removeColor(hex));
     grid.append(card);
   }
 }
@@ -148,43 +154,64 @@ function renderPalette() {
 function render() {
   const hex = appState.selected;
   const card = $('#selected-card');
+  const [r, g, b] = color.rgb(hex);
+  const saved = appState.palette.includes(hex);
   card.style.background = hex;
   card.style.color = color.textOn(hex);
   $('#selected-hex').textContent = hex;
+  $('#selected-rgb').textContent = `rgb(${r}, ${g}, ${b})`;
+  $('#save-current').classList.toggle('saved', saved);
+  $('#save-current').title = saved ? 'Saved' : 'Save color';
+  $('#save-current').setAttribute('aria-label', saved ? 'Saved' : 'Save color');
   $('#native-color').value = hex.toLowerCase();
   if (document.activeElement !== $('#hex-input')) $('#hex-input').value = hex.slice(1);
   $('#pick-shortcut').textContent = shortcutLabel(appState.shortcut);
   $('#shortcut-display').textContent = shortcutLabel(appState.shortcut);
   if (!shortcutDraftDirty && document.activeElement !== $('#shortcut-input')) $('#shortcut-input').value = shortcutInputLabel(appState.shortcut);
-  const status = $('.app-status');
-  status.lastChild.textContent = appState.picking ? ' Opening picker' : appState.shortcutEditing ? ' Editing shortcut' : appState.shortcutAvailable ? ' Ready' : ' Shortcut off';
-  status.classList.toggle('warning', !appState.shortcutEditing && !appState.shortcutAvailable);
-  $('#zoom-permission').hidden = appState.screenPermission !== 'denied' && appState.screenPermission !== 'restricted';
+  renderTheme();
+  $('#zoom-permission').hidden = appState.screenPermission === 'granted';
   renderFormats();
   renderTones();
   renderRecent();
   renderPalette();
 }
 
+function renderTheme() {
+  const theme = appState.theme || 'system';
+  document.querySelectorAll('[data-theme]').forEach(button => {
+    const active = button.dataset.theme === theme;
+    button.classList.toggle('active', active);
+    button.setAttribute('aria-checked', String(active));
+  });
+}
+
 async function applyHex() {
   const value = color.normalize($('#hex-input').value);
-  if (!value) { $('#hex-error').textContent = 'Enter a 3 or 6 digit HEX color.'; return; }
-  $('#hex-error').textContent = '';
-  await window.prism.selectColor(value);
+  // Flag the field and explain in a toast, so the fixed layout never shifts.
+  $('.hex-box').classList.toggle('invalid', !value);
+  if (!value) { toast('Enter a 3 or 6 digit HEX color'); return; }
+  await window.colorPicker.selectColor(value);
   $('#hex-input').blur();
 }
 
 document.querySelectorAll('[data-view]').forEach(button => button.addEventListener('click', () => setView(button.dataset.view)));
-$('#start-picker').addEventListener('click', () => window.prism.startPicker());
-$('#open-screen-settings').addEventListener('click', () => window.prism.openScreenSettings());
-$('#save-current').addEventListener('click', async () => { await window.prism.saveColor(appState.selected); toast('Color saved'); });
-$('#palette-add').addEventListener('click', async () => { await window.prism.saveColor(appState.selected); toast('Color saved'); });
-$('#native-color').addEventListener('input', event => window.prism.selectColor(event.target.value));
+$('#start-picker').addEventListener('click', () => window.colorPicker.startPicker());
+$('#open-screen-settings').addEventListener('click', () => window.colorPicker.openScreenSettings());
+$('#relaunch-app').addEventListener('click', () => window.colorPicker.relaunch());
+$('#save-current').addEventListener('click', async () => { await window.colorPicker.saveColor(appState.selected); toast('Color saved'); });
+$('#copy-current').addEventListener('click', event => copy(appState.selected, event.currentTarget));
+document.querySelectorAll('[data-theme]').forEach(button => button.addEventListener('click', async () => {
+  const result = await window.colorPicker.setTheme(button.dataset.theme);
+  if (result?.ok) { appState.theme = result.theme; renderTheme(); }
+}));
+$('#palette-add').addEventListener('click', async () => { await window.colorPicker.saveColor(appState.selected); toast('Color saved'); });
+$('#native-color').addEventListener('input', event => window.colorPicker.selectColor(event.target.value));
 $('#apply-hex').addEventListener('click', applyHex);
 $('#hex-input').addEventListener('keydown', event => { if (event.key === 'Enter') applyHex(); });
+$('#hex-input').addEventListener('input', () => $('.hex-box').classList.remove('invalid'));
 $('#shortcut-form').addEventListener('submit', async event => {
   event.preventDefault();
-  const result = await window.prism.setShortcut($('#shortcut-input').value);
+  const result = await window.colorPicker.setShortcut($('#shortcut-input').value);
   $('#shortcut-feedback').textContent = result.ok ? 'Shortcut saved.' : result.error;
   if (result.ok) {
     shortcutDraftDirty = false;
@@ -202,10 +229,10 @@ $('#shortcut-input').addEventListener('keydown', event => {
   $('#shortcut-feedback').textContent = '';
 });
 $('#shortcut-input').addEventListener('beforeinput', event => event.preventDefault());
-$('#shortcut-input').addEventListener('focus', () => window.prism.setShortcutEditing(true));
-$('#shortcut-input').addEventListener('blur', () => window.prism.setShortcutEditing(false));
+$('#shortcut-input').addEventListener('focus', () => window.colorPicker.setShortcutEditing(true));
+$('#shortcut-input').addEventListener('blur', () => window.colorPicker.setShortcutEditing(false));
 $('#reset-shortcut').addEventListener('click', async () => {
-  const result = await window.prism.resetShortcut();
+  const result = await window.colorPicker.resetShortcut();
   $('#shortcut-feedback').textContent = result.ok ? 'Default shortcut restored.' : result.error;
   if (result.ok) {
     shortcutDraftDirty = false;
@@ -214,8 +241,8 @@ $('#reset-shortcut').addEventListener('click', async () => {
     toast('Default shortcut restored');
   }
 });
-window.prism.onState(next => { appState = next; render(); });
-window.prism.onPickerError(result => {
+window.colorPicker.onState(next => { appState = next; render(); });
+window.colorPicker.onPickerError(result => {
   toast(result.error);
 });
-window.prism.getState().then(next => { appState = next; render(); });
+window.colorPicker.getState().then(next => { appState = next; render(); });

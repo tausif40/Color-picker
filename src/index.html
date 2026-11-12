@@ -4,72 +4,147 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'none'">
-  <title>Prism Pick</title>
+  <title>Color Picker</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body class="main-body">
-  <div class="app-frame">
-    <header class="app-header">
-      <span class="app-logo" aria-hidden="true"><i></i></span>
-      <div class="app-title"><strong>Prism Pick</strong><small>Color picker</small></div>
-      <span class="app-status"><i></i> Ready</span>
-    </header>
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6.5A2.5 2.5 0 0 1 7.5 4H15"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+      <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M7 4h10a1 1 0 0 1 1 1v15l-6-4-6 4V5a1 1 0 0 1 1-1Z"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.5 7h15M10 11v6M14 11v6M6.5 7l1 12a2 2 0 0 0 2 1.8h5a2 2 0 0 0 2-1.8l1-12M9 7V4.8A.8.8 0 0 1 9.8 4h4.4a.8.8 0 0 1 .8.8V7"/></symbol>
+      <symbol id="i-dropper" viewBox="0 0 24 24"><path d="m3.5 20.5 1-1h2.5l8.5-8.5M4.5 19.5V17l8.5-8.5"/><path d="m14.5 6.5 3-3a2 2 0 0 1 3 3l-3 3 .5.5a1.5 1.5 0 0 1-2.1 2.1l-4-4A1.5 1.5 0 0 1 14 6l.5.5Z"/></symbol>
+      <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2"/><circle cx="9" cy="17" r="2"/></symbol>
+      <symbol id="i-keyboard" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2.5"/><path d="M7 10h.01M11 10h.01M15 10h.01M8 14h8"/></symbol>
+      <symbol id="i-cursor" viewBox="0 0 24 24"><path d="M12 3v6M12 15v6M3 12h6M15 12h6"/></symbol>
+      <symbol id="i-theme" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><path d="M12 4a8 8 0 0 0 0 16Z" fill="currentColor"/></symbol>
+      <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3a9 9 0 1 0 0 18c1.1 0 1.8-.8 1.8-1.8 0-.5-.2-.9-.5-1.2-.3-.3-.5-.7-.5-1.2 0-1 .8-1.8 1.8-1.8H17a4 4 0 0 0 4-4C21 6.6 17 3 12 3Z"/><path d="M7.5 11.5h.01M10 7.5h.01M14.5 7.5h.01"/></symbol>
+      <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v5.5c0 4.3 3 8 7 9.5 4-1.5 7-5.2 7-9.5V6l-7-3Z"/><path d="M12 8.5v4M12 15.5h.01"/></symbol>
+    </defs>
+  </svg>
 
-    <nav class="tabs" aria-label="Main sections">
-      <button class="tab active" data-view="picker">Picker</button>
-      <button class="tab" data-view="palette">Saved <span id="palette-count">0</span></button>
-      <button class="tab" data-view="settings">Settings</button>
-    </nav>
+  <div class="app-frame">
+    <!-- Slim title bar: native close/minimize on the left. -->
+    <header class="app-header"><span class="app-title">Color Picker</span></header>
 
     <main class="app-content">
+      <!-- Picker -->
       <section class="view active" id="view-picker">
-        <div class="selected-card" id="selected-card">
-          <div><span class="selected-label">CURRENT COLOR</span><strong id="selected-hex">#7C5CFF</strong></div>
-          <button id="save-current" class="selected-save" title="Save color" aria-label="Save color">＋</button>
+        <div class="hero" id="selected-card">
+          <div class="hero-value">
+            <span class="hero-label">Current color</span>
+            <strong id="selected-hex">#7C5CFF</strong>
+            <span id="selected-rgb">rgb(124, 92, 255)</span>
+          </div>
+          <div class="hero-actions">
+            <button class="hero-button" id="copy-current" title="Copy HEX" aria-label="Copy HEX"><svg class="icon copy-icon"><use href="#i-copy"/></svg></button>
+            <button class="hero-button" id="save-current" title="Save color" aria-label="Save color"><svg class="icon"><use href="#i-bookmark"/></svg></button>
+          </div>
         </div>
 
-        <button class="pick-button" id="start-picker"><img class="target-icon" src="../assets/dropper-outline.svg" alt=""><strong>Pick color from screen</strong><kbd id="pick-shortcut">⌘ ⇧ P</kbd></button>
-        <div class="zoom-permission" id="zoom-permission" hidden><span>Custom zoom needs Screen Recording permission. Enable it, then reopen Prism Pick.</span><button id="open-screen-settings">Open Settings</button></div>
+        <button class="pick-button" id="start-picker">
+          <span class="pick-icon"><img src="../assets/dropper-outline.svg" alt=""></span>
+          <strong>Pick color from screen</strong>
+          <kbd id="pick-shortcut">⌘ ⇧ P</kbd>
+        </button>
 
-        <div class="section-title"><h2>Color codes</h2><span>Click to copy</span></div>
-        <div class="code-grid" id="format-list"></div>
-
-        <div class="section-title"><h2>Light to dark</h2><span>Choose a shade for its codes</span></div>
-        <div class="tone-list" id="tone-list"></div>
-
-        <div class="section-title"><h2>Choose a color</h2></div>
-        <div class="manual-row">
-          <label class="color-input" title="Open color picker"><input type="color" id="native-color" value="#7c5cff"><span>Pick</span></label>
-          <div class="hex-field"><span>#</span><input id="hex-input" maxlength="7" spellcheck="false" aria-label="HEX color" value="7C5CFF"><button id="apply-hex">Apply</button></div>
+        <div class="notice" id="zoom-permission" hidden>
+          <svg class="icon notice-icon"><use href="#i-shield"/></svg>
+          <p><strong>Allow Screen Recording</strong> for Color Picker in System Settings, then restart.</p>
+          <div class="notice-actions"><button class="button primary small" id="open-screen-settings">Settings</button><button class="button small" id="relaunch-app">Restart</button></div>
         </div>
-        <p class="field-error" id="hex-error" role="alert"></p>
 
-        <div class="section-title recent-heading"><h2>Recent picks</h2></div>
-        <div class="recent-list" id="recent-list"></div>
+        <div class="section-head"><h2>Color codes</h2><span>Click to copy</span></div>
+        <div class="group code-list" id="format-list"></div>
+
+        <div class="section-head"><h2>Light to dark</h2><span>Select a shade</span></div>
+        <div class="tone-strip" id="tone-list"></div>
+
+        <div class="section-head"><h2>Choose a color</h2><span>Use the color panel or type a HEX code</span></div>
+        <div class="choose-row">
+          <label class="panel-button" title="Open the color panel">
+            <span class="panel-swatch"><input type="color" id="native-color" value="#7c5cff" aria-label="Open the color panel"></span>
+            <span class="panel-text"><strong>Color panel</strong><small>Choose visually</small></span>
+          </label>
+          <div class="hex-box">
+            <span class="hash">#</span>
+            <input id="hex-input" maxlength="7" spellcheck="false" autocomplete="off" aria-label="HEX color" value="7C5CFF">
+            <button class="button primary small" id="apply-hex">Apply</button>
+          </div>
+        </div>
+
+        <div class="recent-section">
+          <div class="section-head"><h2>Recent picks</h2></div>
+          <div class="recent-list" id="recent-list"></div>
+        </div>
       </section>
 
+      <!-- Saved -->
       <section class="view" id="view-palette">
-        <div class="page-heading"><h1>Saved colors</h1><p>Your favorite colors, ready to reuse.</p></div>
-        <button class="secondary-button full-width" id="palette-add">＋ Save current color</button>
+        <div class="page-head">
+          <div><h1>Saved colors <span class="count-pill" id="palette-total">0</span></h1><p>Your favorite colors, ready to reuse.</p></div>
+          <button class="button primary small" id="palette-add"><svg class="icon"><use href="#i-bookmark"/></svg>Save current</button>
+        </div>
         <div class="palette-grid" id="palette-grid"></div>
       </section>
 
+      <!-- Settings -->
       <section class="view" id="view-settings">
-        <div class="page-heading"><h1>Settings</h1><p>Keep color picking one shortcut away.</p></div>
-        <div class="setting-card">
-          <div class="setting-heading"><span class="setting-symbol">⌨</span><div><strong>Global shortcut</strong><p>Works while Prism Pick is in the background.</p></div></div>
-          <div class="shortcut-current"><span>Current shortcut</span><kbd id="shortcut-display">⌘ ⇧ P</kbd></div>
+        <div class="page-head"><div><h1>Settings</h1><p>Shortcut, appearance and picking tips.</p></div></div>
+
+        <div class="group setting-group">
+          <div class="setting-row">
+            <span class="setting-icon"><svg class="icon"><use href="#i-keyboard"/></svg></span>
+            <div class="setting-text"><strong>Global shortcut</strong><p>Works while Color Picker is in the background.</p></div>
+            <kbd class="keycap" id="shortcut-display">⌘ ⇧ P</kbd>
+          </div>
           <form id="shortcut-form" class="shortcut-form">
-            <label for="shortcut-input">New shortcut</label>
-            <div class="shortcut-entry"><input id="shortcut-input" type="text" readonly spellcheck="false" autocomplete="off" placeholder="Press your shortcut" aria-label="Press your new shortcut"><button type="submit" class="secondary-button">Save</button></div>
-            <p>Click the field, press your keys, then Save. For example, Option+C or F8.</p>
+            <div class="shortcut-entry">
+              <input id="shortcut-input" type="text" readonly spellcheck="false" autocomplete="off" placeholder="Click, then press your shortcut" aria-label="Press your new shortcut">
+              <button type="submit" class="button primary small">Save</button>
+            </div>
+            <div class="shortcut-foot">
+              <p>Click the field and press keys, e.g. Option+C or F8.</p>
+              <button type="button" id="reset-shortcut" class="link-button">Reset to default</button>
+            </div>
+            <p class="settings-feedback" id="shortcut-feedback" role="status"></p>
           </form>
-          <button id="reset-shortcut" class="quiet-button shortcut-reset">Reset to default</button>
-          <p class="settings-feedback" id="shortcut-feedback" role="status"></p>
         </div>
-        <div class="setting-note"><strong>How to pick</strong><p>Press the shortcut or click “Pick color from screen”, move over a pixel, then click. Press Esc to cancel.</p></div>
+
+        <div class="group setting-group">
+          <div class="setting-row">
+            <span class="setting-icon"><svg class="icon"><use href="#i-theme"/></svg></span>
+            <div class="setting-text"><strong>Appearance</strong><p>System follows your Mac.</p></div>
+            <div class="segmented theme-switch" role="radiogroup" aria-label="Appearance">
+              <button type="button" role="radio" aria-checked="false" data-theme="system">System</button>
+              <button type="button" role="radio" aria-checked="false" data-theme="light">Light</button>
+              <button type="button" role="radio" aria-checked="false" data-theme="dark">Dark</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="group setting-group">
+          <div class="setting-row">
+            <span class="setting-icon"><svg class="icon"><use href="#i-cursor"/></svg></span>
+            <div class="setting-text"><strong>How to pick</strong><p>Press the shortcut or click “Pick color from screen”.</p></div>
+          </div>
+          <ul class="howto">
+            <li><span>Pick the pixel under the plus cursor</span><span><kbd>Click</kbd><kbd>Enter</kbd></span></li>
+            <li><span>Move one pixel (Shift for ten)</span><span><kbd>←</kbd><kbd>↑</kbd><kbd>↓</kbd><kbd>→</kbd></span></li>
+            <li><span>Zoom the magnifier</span><span><kbd>Scroll</kbd></span></li>
+            <li><span>Cancel</span><span><kbd>Esc</kbd></span></li>
+          </ul>
+        </div>
       </section>
     </main>
+
+    <!-- Section tabs at the bottom. -->
+    <nav class="tab-bar" aria-label="Main sections">
+      <button class="tab active" data-view="picker"><svg class="icon"><use href="#i-dropper"/></svg><span>Picker</span></button>
+      <button class="tab" data-view="palette"><svg class="icon"><use href="#i-bookmark"/></svg><span>Saved</span></button>
+      <button class="tab" data-view="settings"><svg class="icon"><use href="#i-sliders"/></svg><span>Settings</span></button>
+    </nav>
     <div class="toast" id="toast" role="status"></div>
   </div>
   <script src="color-ui.js"></script>

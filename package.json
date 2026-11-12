@@ -1,9 +1,10 @@
 {
-  "name": "prism-pick",
+  "name": "color-picker",
+  "productName": "Color Picker",
   "version": "1.2.3",
   "private": true,
   "description": "A fast, cross-platform screen color picker and palette manager",
-  "author": "Prism Pick",
+  "author": "Color Picker",
   "main": "src/main.cjs",
   "scripts": {
     "start": "electron .",
@@ -19,8 +20,8 @@
     "electron-builder": "^26.0.12"
   },
   "build": {
-    "appId": "com.prismpick.desktop",
-    "productName": "Prism Pick",
+    "appId": "com.colorpicker.desktop",
+    "productName": "Color Picker",
     "electronLanguages": [
       "en-US"
     ],
@@ -36,7 +37,7 @@
       "category": "public.app-category.graphics-design",
       "icon": "assets/app.icns",
       "extendInfo": {
-        "NSScreenCaptureUsageDescription": "Prism Pick uses a live screen preview to magnify the pixel under the pointer while you pick a color."
+        "NSScreenCaptureUsageDescription": "Color Picker uses a live screen preview to magnify the pixel under the pointer while you pick a color."
       },
       "target": [
         "dmg",

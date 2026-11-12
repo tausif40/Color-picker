@@ -1,126 +1,282 @@
+// The window is created ahead of time and kept hidden. Each pick starts with
+// `picker:begin` (display, cursor and stream source) and ends with `picker:end`.
 const video = document.querySelector('#feed');
 const pointer = document.querySelector('#pointer');
-const bubble = document.querySelector('#bubble');
+const loupe = document.querySelector('#loupe');
 const zoom = document.querySelector('#zoom');
 const context = zoom.getContext('2d', { alpha: false });
 const sample = document.createElement('canvas');
 sample.width = sample.height = 1;
 const sampleContext = sample.getContext('2d', { willReadFrequently: true });
-let stream;
-const query = new URLSearchParams(window.location.search);
-// Display bounds in screen points. The stream covers exactly this area, even if the
-// OS places the overlay window slightly inside it (for example below the menu bar).
-const display = {
-  x: Number(query.get('displayX')) || 0,
-  y: Number(query.get('displayY')) || 0,
-  width: Number(query.get('displayWidth')) || window.innerWidth,
-  height: Number(query.get('displayHeight')) || window.innerHeight
-};
-// Hotspot position relative to the display's top-left corner.
-const initialX = query.has('cursorX') ? Number(query.get('cursorX')) : display.width / 2;
-const initialY = query.has('cursorY') ? Number(query.get('cursorY')) : display.height / 2;
-let x = Math.max(0, Math.min(display.width - 1, initialX));
-let y = Math.max(0, Math.min(display.height - 1, initialY));
-let active = query.get('active') === 'true';
-let hex;
-let finished = false;
 
-function windowOffset() {
-  return { x: window.screenX - display.x, y: window.screenY - display.y };
+const LOUPE_SIZE = 128;               // CSS size of the round loupe
+const ZOOM_LEVELS = [9, 13, 17, 25];  // screen pixels across the loupe; odd so one is centred
+const DEFAULT_ZOOM = 1;
+const POINTER_CENTER = 12.5;          // centre of the 25px plus cursor
+const LOUPE_GAP = 22;                 // space between the cursor and the loupe
+const EDGE = 8;                       // keep the loupe this far from screen edges
+const WHEEL_STEP = 40;
+
+let session = 0;
+let display = { x: 0, y: 0, width: window.innerWidth, height: window.innerHeight };
+let streamWidth = 0, streamHeight = 0;
+let x = 0, y = 0;                     // hotspot in points, relative to the display
+let active = false;
+let zoomIndex = DEFAULT_ZOOM;
+let wheelDelta = 0;
+let finished = true;                  // no pick in progress
+let streamReady = false;
+let pendingPick = false;              // clicked before the first frame arrived
+let updateQueued = false;
+let stream = null;
+
+function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
+function videoReady() { return streamReady && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth > 0 && video.videoHeight > 0; }
+function frameSize() { return { width: video.videoWidth || streamWidth || display.width, height: video.videoHeight || streamHeight || display.height }; }
+function scale() { const frame = frameSize(); return { x: frame.width / display.width, y: frame.height / display.height }; }
+function windowOffset() { return { x: window.screenX - display.x, y: window.screenY - display.y }; }
+function toHex(r, g, b) { return '#' + [r, g, b].map(value => value.toString(16).padStart(2, '0')).join('').toUpperCase(); }
+
+// The screen pixel (in stream pixels) that will be picked.
+function targetPixel() {
+  const frame = frameSize(), factor = scale();
+  return {
+    x: clamp(Math.floor(x * factor.x + 1e-6), 0, frame.width - 1),
+    y: clamp(Math.floor(y * factor.y + 1e-6), 0, frame.height - 1)
+  };
 }
 
-function position() {
-  pointer.hidden = bubble.hidden = !active;
-  const offset = windowOffset();
-  const left = x - offset.x, top = y - offset.y;
-  // The arrow tip sits at (3, 2.5) in its 32x38 artwork; put it on the sampled pixel.
-  pointer.style.left = `${left - 3}px`;
-  pointer.style.top = `${top - 2.5}px`;
-  bubble.style.left = `${left + 48 + 146 < window.innerWidth ? left + 48 : left - 166}px`;
-  bubble.style.top = `${top + 16 + 172 < window.innerHeight ? top + 16 : top - 184}px`;
+function sampleHex(pixel) {
+  sampleContext.drawImage(video, pixel.x, pixel.y, 1, 1, 0, 0, 1, 1);
+  const [r, g, b] = sampleContext.getImageData(0, 0, 1, 1).data;
+  return toHex(r, g, b);
 }
 
-function draw() {
-  if (finished) return;
-  if (video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && video.videoWidth && video.videoHeight) {
-    const pixelX = Math.max(0, Math.min(video.videoWidth - 1, Math.floor(x * video.videoWidth / display.width)));
-    const pixelY = Math.max(0, Math.min(video.videoHeight - 1, Math.floor(y * video.videoHeight / display.height)));
-    context.imageSmoothingEnabled = false;
-    context.drawImage(video, pixelX - 5, pixelY - 5, 11, 11, 0, 0, 130, 130);
-    context.strokeStyle = '#fff';
-    context.lineWidth = 2;
-    context.strokeRect(59, 59, 12, 12);
-    context.strokeStyle = '#272a35';
+function layout(pixel) {
+  pointer.hidden = !active;
+  loupe.hidden = !active || !videoReady();
+  if (!active) return;
+  const factor = scale(), offset = windowOffset();
+  // Centre the plus cursor on the middle of the target pixel.
+  const left = (pixel.x + .5) / factor.x - offset.x;
+  const top = (pixel.y + .5) / factor.y - offset.y;
+  pointer.style.transform = `translate(${left - POINTER_CENTER}px, ${top - POINTER_CENTER}px)`;
+  if (loupe.hidden) return;
+
+  // Below-right of the cursor; flip at screen edges so it never covers the target.
+  let loupeX = left + LOUPE_GAP, loupeY = top + LOUPE_GAP;
+  if (loupeX + LOUPE_SIZE > window.innerWidth - EDGE) loupeX = left - LOUPE_GAP - LOUPE_SIZE;
+  if (loupeY + LOUPE_SIZE > window.innerHeight - EDGE) loupeY = top - LOUPE_GAP - LOUPE_SIZE;
+  loupeX = clamp(loupeX, EDGE, window.innerWidth - LOUPE_SIZE - EDGE);
+  loupeY = clamp(loupeY, EDGE, window.innerHeight - LOUPE_SIZE - EDGE);
+  loupe.style.transform = `translate(${Math.round(loupeX)}px, ${Math.round(loupeY)}px)`;
+}
+
+function renderLoupe(pixel) {
+  const size = zoom.width, ratio = size / LOUPE_SIZE;
+  const grid = ZOOM_LEVELS[zoomIndex], half = (grid - 1) / 2, cell = size / grid;
+  context.imageSmoothingEnabled = false;
+  context.fillStyle = '#2a2d36';
+  context.fillRect(0, 0, size, size);
+
+  // Copy only the on-screen part of the area, so edges stay aligned.
+  const sx = pixel.x - half, sy = pixel.y - half;
+  const x0 = Math.max(0, sx), y0 = Math.max(0, sy);
+  const x1 = Math.min(video.videoWidth, sx + grid), y1 = Math.min(video.videoHeight, sy + grid);
+  if (x1 > x0 && y1 > y0) {
+    context.drawImage(video, x0, y0, x1 - x0, y1 - y0, (x0 - sx) * cell, (y0 - sy) * cell, (x1 - x0) * cell, (y1 - y0) * cell);
+  }
+
+  if (cell >= 7 * ratio) {
+    context.beginPath();
+    for (let i = 1; i < grid; i++) {
+      const line = Math.round(i * cell) + .5;
+      context.moveTo(line, 0); context.lineTo(line, size);
+      context.moveTo(0, line); context.lineTo(size, line);
+    }
     context.lineWidth = 1;
-    context.strokeRect(60, 60, 10, 10);
-    sampleContext.drawImage(video, pixelX, pixelY, 1, 1, 0, 0, 1, 1);
-    const rgb = sampleContext.getImageData(0, 0, 1, 1).data;
-    hex = '#' + Array.from(rgb.slice(0, 3), value => value.toString(16).padStart(2, '0')).join('').toUpperCase();
-    document.querySelector('#hex').textContent = hex;
-    document.querySelector('#swatch').style.backgroundColor = hex;
+    context.strokeStyle = 'rgba(128, 128, 128, .28)';
+    context.stroke();
   }
-  scheduleDraw();
+
+  // Outline the picked pixel: a light line on a dark edge, visible on any color.
+  const start = half * cell - ratio, box = cell + 2 * ratio;
+  context.lineWidth = 3.5 * ratio;
+  context.strokeStyle = 'rgba(10, 12, 18, .8)';
+  context.strokeRect(start, start, box, box);
+  context.lineWidth = 1.5 * ratio;
+  context.strokeStyle = '#fff';
+  context.strokeRect(start, start, box, box);
 }
 
-function scheduleDraw() {
-  if (typeof video.requestVideoFrameCallback === 'function') video.requestVideoFrameCallback(draw);
-  else requestAnimationFrame(draw);
-}
-
-window.addEventListener('mousemove', event => {
-  const offset = windowOffset();
-  x = event.clientX + offset.x;
-  y = event.clientY + offset.y;
-  active = true;
-  position();
-});
-window.addEventListener('mouseleave', () => { active = false; position(); });
-window.addEventListener('mousedown', event => {
-  event.preventDefault();
+function update() {
+  updateQueued = false;
   if (finished) return;
-  if (event.button === 2) {
-    finished = true;
-    window.pickerBridge.cancel();
-    return;
-  }
-  if (!hex) return;
-  finished = true;
-  window.pickerBridge.choose(hex);
-});
-window.addEventListener('keydown', event => {
-  if (event.key !== 'Escape' || finished) return;
-  event.preventDefault();
-  finished = true;
-  window.pickerBridge.cancel();
-});
-window.addEventListener('contextmenu', event => event.preventDefault());
-window.addEventListener('beforeunload', () => stream?.getTracks().forEach(track => track.stop()));
+  const pixel = targetPixel();
+  layout(pixel);
+  if (active && videoReady()) renderLoupe(pixel);
+}
 
-async function start() {
+function requestUpdate() {
+  if (updateQueued) return;
+  updateQueued = true;
+  requestAnimationFrame(update);
+}
+
+function watchFrames(current) {
+  if (typeof video.requestVideoFrameCallback === 'function') {
+    const onFrame = () => {
+      if (finished || session !== current) return;
+      requestUpdate();
+      video.requestVideoFrameCallback(onFrame);
+    };
+    video.requestVideoFrameCallback(onFrame);
+  } else {
+    const timer = setInterval(() => {
+      if (finished || session !== current) clearInterval(timer);
+      else requestUpdate();
+    }, 50);
+  }
+}
+
+function pick() {
+  if (finished) return;
+  // Clicked before the stream delivered its first frame: pick as soon as it does.
+  if (!videoReady()) { pendingPick = true; return; }
+  // Sample now rather than reusing the last drawn frame, so the click position is exact.
+  const hex = sampleHex(targetPixel());
+  finished = true;
+  window.pickerBridge.choose(session, hex);
+}
+
+function cancel() {
+  if (finished) return;
+  finished = true;
+  window.pickerBridge.cancel(session);
+}
+
+function moveTo(event) {
+  const offset = windowOffset();
+  x = clamp(event.clientX + offset.x, 0, display.width - 1);
+  y = clamp(event.clientY + offset.y, 0, display.height - 1);
+  active = true;
+}
+
+// Move exactly one screen pixel (ten with Shift).
+function nudge(dx, dy, step) {
+  const pixel = targetPixel(), factor = scale(), frame = frameSize();
+  x = (clamp(pixel.x + dx * step, 0, frame.width - 1) + .5) / factor.x;
+  y = (clamp(pixel.y + dy * step, 0, frame.height - 1) + .5) / factor.y;
+  active = true;
+  requestUpdate();
+}
+
+function zoomBy(direction) {
+  const next = clamp(zoomIndex + direction, 0, ZOOM_LEVELS.length - 1);
+  if (next === zoomIndex) return;
+  zoomIndex = next;
+  requestUpdate();
+}
+
+function stopStream() {
+  stream?.getTracks().forEach(track => track.stop());
+  stream = null;
+  video.srcObject = null;
+}
+
+function end() {
+  finished = true;
+  streamReady = false;
+  pendingPick = false;
+  stopStream();
+  pointer.hidden = loupe.hidden = true;
+}
+
+async function begin(config) {
+  end();
+  const current = config.session;
+  session = current;
+  display = config.display;
+  streamWidth = config.width;
+  streamHeight = config.height;
+  x = clamp(config.cursorX, 0, display.width - 1);
+  y = clamp(config.cursorY, 0, display.height - 1);
+  active = !!config.active;
+  zoomIndex = DEFAULT_ZOOM;
+  wheelDelta = 0;
+  finished = false;
+  zoom.width = zoom.height = Math.round(LOUPE_SIZE * (window.devicePixelRatio || 1));
+  update(); // the cursor appears immediately; the loupe follows once frames arrive
+
   try {
-    const source = query.get('source');
-    const width = Number(query.get('width'));
-    const height = Number(query.get('height'));
-    if (!source) throw new Error('Screen source missing.');
-    stream = await navigator.mediaDevices.getUserMedia({
+    const next = await navigator.mediaDevices.getUserMedia({
       audio: false,
       video: { mandatory: {
-        chromeMediaSource: 'desktop', chromeMediaSourceId: source,
-        minWidth: width, maxWidth: width, minHeight: height, maxHeight: height,
-        maxFrameRate: 20
+        chromeMediaSource: 'desktop', chromeMediaSourceId: config.source,
+        minWidth: streamWidth, maxWidth: streamWidth, minHeight: streamHeight, maxHeight: streamHeight,
+        maxFrameRate: 30
       } }
     });
+    if (finished || session !== current) { next.getTracks().forEach(track => track.stop()); return; }
+    stream = next;
     video.srcObject = stream;
     await video.play();
     if (video.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
       await new Promise(resolve => video.addEventListener('loadeddata', resolve, { once: true }));
     }
-    position();
-    scheduleDraw();
-    window.pickerBridge.ready();
+    if (finished || session !== current) return;
+    streamReady = true;
+    window.pickerBridge.ready(current);
+    watchFrames(current);
+    if (pendingPick) pick();
+    else requestUpdate();
   } catch (error) {
-    window.pickerBridge.failed(error?.message || 'Screen capture is unavailable.');
+    if (finished || session !== current) return;
+    finished = true;
+    window.pickerBridge.failed(current, error?.message || 'Screen capture is unavailable.');
   }
 }
 
-start();
+const NUDGES = { ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] };
+
+window.addEventListener('mousemove', event => {
+  if (finished) return;
+  moveTo(event);
+  requestUpdate();
+});
+window.addEventListener('mouseleave', () => {
+  if (finished) return;
+  active = false;
+  requestUpdate();
+});
+window.addEventListener('mousedown', event => {
+  event.preventDefault();
+  if (finished) return;
+  if (event.button === 2) { cancel(); return; }
+  if (event.button !== 0) return;
+  moveTo(event);
+  pick();
+});
+window.addEventListener('keydown', event => {
+  if (finished) return;
+  const direction = NUDGES[event.key];
+  if (event.key === 'Escape') cancel();
+  else if (event.key === 'Enter' || event.key === ' ') pick();
+  else if (direction) nudge(direction[0], direction[1], event.shiftKey ? 10 : 1);
+  else if (event.key === '+' || event.key === '=') zoomBy(-1);
+  else if (event.key === '-' || event.key === '_') zoomBy(1);
+  else return;
+  event.preventDefault();
+});
+window.addEventListener('wheel', event => {
+  if (finished) return;
+  wheelDelta += event.deltaY;
+  if (Math.abs(wheelDelta) < WHEEL_STEP) return;
+  zoomBy(Math.sign(wheelDelta)); // scroll up zooms in
+  wheelDelta = 0;
+}, { passive: true });
+window.addEventListener('contextmenu', event => event.preventDefault());
+window.addEventListener('beforeunload', stopStream);
+
+window.pickerBridge.onBegin(config => { void begin(config); });
+window.pickerBridge.onEnd(end);

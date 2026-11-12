@@ -1,8 +1,10 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('pickerBridge', {
-  ready: () => ipcRenderer.send('picker:ready'),
-  failed: message => ipcRenderer.send('picker:failed', message),
-  choose: hex => ipcRenderer.send('picker:choose', hex),
-  cancel: () => ipcRenderer.send('picker:cancel')
+  onBegin: callback => ipcRenderer.on('picker:begin', (_event, config) => callback(config)),
+  onEnd: callback => ipcRenderer.on('picker:end', () => callback()),
+  ready: session => ipcRenderer.send('picker:ready', session),
+  failed: (session, message) => ipcRenderer.send('picker:failed', session, message),
+  choose: (session, hex) => ipcRenderer.send('picker:choose', session, hex),
+  cancel: session => ipcRenderer.send('picker:cancel', session)
 });

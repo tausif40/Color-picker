@@ -14,7 +14,7 @@ function showToast(message) {
 }
 
 async function copy(value, button) {
-  const result = await window.prism.copy(value);
+  const result = await window.colorPicker.copy(value);
   if (!result.ok) return;
   const icon = button?.querySelector('.copy-icon');
   if (icon) {
@@ -61,13 +61,13 @@ function render(state) {
     button.innerHTML = '<span></span><small></small>';
     button.querySelector('span').style.background = hex;
     button.querySelector('small').textContent = hex.slice(1);
-    button.addEventListener('click', async () => { await window.prism.selectShade(hex); await copy(hex); });
+    button.addEventListener('click', () => window.colorPicker.selectShade(hex));
     tones.append(button);
   }
 }
 
-$('#popup-close').addEventListener('click', () => window.prism.closePopup());
-$('#popup-save').addEventListener('click', async () => { await window.prism.saveColor(selected); showToast('Color saved'); });
-window.addEventListener('keydown', event => { if (event.key === 'Escape') window.prism.closePopup(); });
-window.prism.onState(render);
-window.prism.getState().then(render);
+$('#popup-close').addEventListener('click', () => window.colorPicker.closePopup());
+$('#popup-save').addEventListener('click', async () => { await window.colorPicker.saveColor(selected); showToast('Color saved'); });
+window.addEventListener('keydown', event => { if (event.key === 'Escape') window.colorPicker.closePopup(); });
+window.colorPicker.onState(render);
+window.colorPicker.getState().then(render);

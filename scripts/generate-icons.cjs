@@ -6,7 +6,7 @@ const path = require('node:path');
 const assets = path.join(__dirname, '..', 'assets');
 app.on('window-all-closed', () => {});
 
-async function render(svg, size) {
+async function render(svg, size, padding = 0) {
   const window = new BrowserWindow({
     width: size, height: size, show: false, frame: false,
     transparent: true, backgroundColor: '#00000000',
@@ -14,7 +14,7 @@ async function render(svg, size) {
   });
   try {
     const source = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
-    const html = `<!doctype html><html><head><style>html,body{margin:0;width:100%;height:100%;background:transparent}img{display:block;width:100%;height:100%}</style></head><body><img src="${source}"></body></html>`;
+    const html = `<!doctype html><html><head><style>html,body{margin:0;width:100%;height:100%;background:transparent}img{display:block;width:100%;height:100%;box-sizing:border-box;padding:${padding}px}</style></head><body><img src="${source}"></body></html>`;
     await window.loadURL(`data:text/html;base64,${Buffer.from(html).toString('base64')}`);
     await window.webContents.executeJavaScript('document.images[0].decode()');
     await window.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))');
@@ -74,7 +74,15 @@ async function main() {
   // Dark ink is visible in the Windows tray; macOS uses its alpha as a template.
   const traySvg = outlineSvg.replace('stroke="#FFFFFF"', 'stroke="#20252E"');
   fs.writeFileSync(path.join(assets, 'tray.png'), (await render(traySvg, 64)).resize({ width: 64, height: 64, quality: 'best' }).toPNG());
-  console.log('Generated app.png, app.icns, app.ico and tray.png from the SVG artwork.');
+
+  // macOS menu bar: 18pt template image (+ @2x), with heavier strokes so the thin
+  // artwork stays legible at that size and a little padding like system icons.
+  const menuBarSvg = traySvg.replace(/stroke-width="([\d.]+)"/g, (_match, width) => `stroke-width="${Number(width) * 1.8}"`);
+  for (const [file, size] of [['trayTemplate.png', 18], ['trayTemplate@2x.png', 36]]) {
+    const image = await render(menuBarSvg, size * 4, size * 4 / 18);
+    fs.writeFileSync(path.join(assets, file), image.resize({ width: size, height: size, quality: 'best' }).toPNG());
+  }
+  console.log('Generated app.png, app.icns, app.ico, tray.png and trayTemplate(@2x).png from the SVG artwork.');
 }
 
 app.whenReady().then(main).then(() => app.quit()).catch(error => {

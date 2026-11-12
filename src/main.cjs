@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, nativeImage, globalShortcut, screen, ipcMain, clipboard, desktopCapturer, systemPreferences, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, nativeImage, nativeTheme, globalShortcut, screen, ipcMain, clipboard, desktopCapturer, systemPreferences, shell } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { normalizeHex } = require('./color.cjs');
@@ -6,11 +6,16 @@ const { normalizeShortcut } = require('./shortcut.cjs');
 
 const DEFAULT_SHORTCUT = 'CommandOrControl+Shift+P';
 const DEFAULT_COLOR = '#7C5CFF';
+const THEMES = ['system', 'light', 'dark'];
 const preload = path.join(__dirname, 'preload.cjs');
-let mainWindow, popupWindow, pickerWindow, cursorWindow, cursorTimer, tray;
-let pickerWindows = [];
-let pickerReady = new Map();
-let pickerResult;
+let mainWindow, popupWindow, tray;
+// Picker overlays (one per display) are created ahead of time and kept hidden, and the
+// screen source ids are cached, so the shortcut only has to start the stream.
+let pickerPool = [];       // [{ displayId, window, loaded }]
+let screenSources = null;  // Map<displayId, sourceId>
+let pickerSession = 0;
+let pickerResult = null;   // { session, resolve, reject } for the open picker
+let pickerPoolStale = false;
 let zoomPermissionGranted = false;
 let picking = false;
 let restoreMainAfterCancel = false;
@@ -25,27 +30,42 @@ if (!primaryInstance) app.quit();
 else app.on('second-instance', () => showMain());
 
 function statePath() { return path.join(app.getPath('userData'), 'colors.json'); }
+function screenAccess() {
+  if (process.platform !== 'darwin' || zoomPermissionGranted) return 'granted';
+  return systemPreferences.getMediaAccessStatus('screen');
+}
+
 function state() {
   return {
     ...data, platform: process.platform, picking, shortcutAvailable, shortcutEditing,
-    screenPermission: process.platform === 'darwin'
-      ? zoomPermissionGranted ? 'granted' : systemPreferences.getMediaAccessStatus('screen')
-      : 'granted'
+    screenPermission: screenAccess()
   };
+}
+
+// Colors saved before the app was renamed from Prism Pick live in its old data folder.
+function readSavedState() {
+  const legacy = ['Prism Pick', 'prism-pick'].map(name => path.join(app.getPath('appData'), name, 'colors.json'));
+  for (const file of [statePath(), ...legacy]) {
+    try { return JSON.parse(fs.readFileSync(file, 'utf8')); }
+    catch { /* try the next location */ }
+  }
+  throw new Error('No saved colors.');
 }
 
 function loadState() {
   try {
-    const saved = JSON.parse(fs.readFileSync(statePath(), 'utf8'));
+    const saved = readSavedState();
     data = {
       selected: normalizeHex(saved.selected) || DEFAULT_COLOR,
       toneBase: normalizeHex(saved.toneBase) || normalizeHex(saved.selected) || DEFAULT_COLOR,
       recent: Array.isArray(saved.recent) ? saved.recent.map(normalizeHex).filter(Boolean).slice(0, 24) : [],
       palette: Array.isArray(saved.palette) ? [...new Set(saved.palette.map(normalizeHex).filter(Boolean))].slice(0, 100) : [],
-      shortcut: normalizeShortcut(saved.shortcut) || DEFAULT_SHORTCUT
+      shortcut: normalizeShortcut(saved.shortcut) || DEFAULT_SHORTCUT,
+      theme: THEMES.includes(saved.theme) ? saved.theme : 'system'
     };
+    if (!fs.existsSync(statePath())) saveState();
   } catch {
-    data = { selected: DEFAULT_COLOR, toneBase: DEFAULT_COLOR, recent: [], palette: [], shortcut: DEFAULT_SHORTCUT };
+    data = { selected: DEFAULT_COLOR, toneBase: DEFAULT_COLOR, recent: [], palette: [], shortcut: DEFAULT_SHORTCUT, theme: 'system' };
   }
 }
 
@@ -65,10 +85,21 @@ function broadcast() {
   updateTray();
 }
 
+function windowBackground() { return nativeTheme.shouldUseDarkColors ? '#1B1B1E' : '#F4F4F7'; }
+
+// 'system' follows macOS/Windows appearance; 'light' and 'dark' override it for the app.
+function setTheme(theme) {
+  if (!THEMES.includes(theme)) return { ok: false };
+  data.theme = theme;
+  nativeTheme.themeSource = theme;
+  saveState(); broadcast();
+  return { ok: true, theme };
+}
+
 function windowOptions(extra = {}) {
   return {
     show: false,
-    backgroundColor: '#F6F7F9',
+    backgroundColor: windowBackground(),
     webPreferences: { preload, contextIsolation: true, nodeIntegration: false, sandbox: true },
     ...extra
   };
@@ -76,9 +107,14 @@ function windowOptions(extra = {}) {
 
 function createMain() {
   mainWindow = new BrowserWindow(windowOptions({
-    width: 480, height: 690, minWidth: 420, minHeight: 560,
-    title: 'Prism Pick', icon: path.join(__dirname, '..', 'assets', 'app.png'),
-    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    // Fixed size: every section is laid out to fit without scrolling.
+    width: 480, height: 646, resizable: false,
+    title: 'Color Picker', icon: path.join(__dirname, '..', 'assets', 'app.png'),
+    // Native macOS close and minimize buttons; the green zoom/full-screen button is disabled.
+    titleBarStyle: process.platform === 'darwin' ? 'hidden' : 'default',
+    trafficLightPosition: { x: 14, y: 12 },
+    maximizable: false,
+    fullscreenable: false,
     autoHideMenuBar: true
   }));
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
@@ -125,27 +161,32 @@ function showPopup() {
 }
 
 function icon() {
-  // tray.png is 64px; give the tray a menu-bar sized image with a Retina representation.
-  const source = nativeImage.createFromPath(path.join(__dirname, '..', 'assets', 'tray.png'));
-  const size = process.platform === 'darwin' ? 18 : 16;
+  const assets = path.join(__dirname, '..', 'assets');
+  if (process.platform === 'darwin') {
+    // 18pt menu-bar template; Electron loads trayTemplate@2x.png for Retina automatically.
+    const image = nativeImage.createFromPath(path.join(assets, 'trayTemplate.png'));
+    image.setTemplateImage(true);
+    return image;
+  }
+  // Windows tray: 16px with a 32px representation for high-DPI screens.
+  const source = nativeImage.createFromPath(path.join(assets, 'tray.png'));
   const image = nativeImage.createEmpty();
   for (const scaleFactor of [1, 2]) {
-    const pixels = size * scaleFactor;
+    const pixels = 16 * scaleFactor;
     image.addRepresentation({ scaleFactor, buffer: source.resize({ width: pixels, height: pixels, quality: 'best' }).toPNG() });
   }
-  if (process.platform === 'darwin') image.setTemplateImage(true);
   return image;
 }
 
 function updateTray() {
   if (!tray) return;
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: 'Open Prism Pick', click: showMain },
+    { label: 'Open Color Picker', click: showMain },
     { label: `Pick color  ·  ${data.shortcut}`, click: startPicker },
     { type: 'separator' },
-    { label: 'Quit Prism Pick', click: () => { quitting = true; app.quit(); } }
+    { label: 'Quit Color Picker', click: () => { quitting = true; app.quit(); } }
   ]));
-  tray.setToolTip(`Prism Pick — ${data.shortcut}`);
+  tray.setToolTip(`Color Picker — ${data.shortcut}`);
 }
 
 function registerShortcut(value) {
@@ -190,11 +231,22 @@ function setShortcut(value) {
   return { ok: true, shortcut };
 }
 
-function cancelCustomPicker() {
-  if (!pickerResult) return;
-  const resolve = pickerResult;
+function settlePicker(session, value) {
+  if (!pickerResult || pickerResult.session !== session) return;
+  const { resolve } = pickerResult;
   pickerResult = null;
-  resolve({ ok: false, name: 'AbortError' });
+  resolve(value);
+}
+
+function failPicker(session, error) {
+  if (!pickerResult || pickerResult.session !== session) return;
+  const { reject } = pickerResult;
+  pickerResult = null;
+  reject(error);
+}
+
+function cancelCustomPicker() {
+  if (pickerResult) settlePicker(pickerResult.session, { ok: false, name: 'AbortError' });
 }
 
 // Escape must cancel even when another app still owns keyboard focus.
@@ -210,183 +262,165 @@ function unregisterPickerEscape() {
   pickerEscapeRegistered = false;
 }
 
-function closeCustomPicker() {
-  unregisterPickerEscape();
-  for (const window of pickerWindows) {
+function withTimeout(promise, ms, message) {
+  let timer;
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(message)), ms); })
+  ]).finally(() => clearTimeout(timer));
+}
+
+function containsPoint(bounds, point) {
+  return bounds.x <= point.x && point.x < bounds.x + bounds.width
+    && bounds.y <= point.y && point.y < bounds.y + bounds.height;
+}
+
+function createPickerWindow(display) {
+  const window = new BrowserWindow({
+    x: display.bounds.x, y: display.bounds.y,
+    width: display.bounds.width, height: display.bounds.height,
+    show: false, frame: false, transparent: true,
+    resizable: false, movable: false, skipTaskbar: true,
+    hasShadow: false, backgroundColor: '#00000000',
+    acceptFirstMouse: true,
+    webPreferences: {
+      preload: path.join(__dirname, 'picker-preload.cjs'),
+      contextIsolation: true, nodeIntegration: false, sandbox: true,
+      backgroundThrottling: false
+    }
+  });
+  window.setBounds(display.bounds);
+  window.setAlwaysOnTop(true, 'screen-saver');
+  window.setContentProtection(true); // keep the overlay itself out of the captured pixels
+  if (process.platform === 'darwin') window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+  window.on('closed', () => { pickerPool = pickerPool.filter(item => item.window !== window); });
+  const loaded = window.loadFile(path.join(__dirname, 'picker.html'));
+  return { displayId: display.id, window, loaded };
+}
+
+function destroyPickerPool() {
+  for (const { window } of pickerPool) {
     if (!window.isDestroyed()) window.destroy();
   }
-  pickerWindows = [];
-  pickerReady.clear();
+  pickerPool = [];
+}
+
+// Returns the displays, with one ready overlay window per display at the same index.
+function preparePickerPool() {
+  const displays = screen.getAllDisplays();
+  const matches = !pickerPoolStale && pickerPool.length === displays.length
+    && pickerPool.every((item, index) => item.displayId === displays[index].id && !item.window.isDestroyed());
+  if (!matches) {
+    destroyPickerPool();
+    pickerPool = displays.map(createPickerWindow);
+    pickerPoolStale = false;
+  }
+  return displays;
+}
+
+async function loadScreenSources() {
+  const sources = await withTimeout(
+    desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } }),
+    15000, 'Screen capture could not start.');
+  const displays = screen.getAllDisplays();
+  const map = new Map();
+  displays.forEach((display, index) => {
+    const source = sources.find(item => item.display_id === String(display.id))
+      || (sources.length === displays.length ? sources[index] : null);
+    if (source) map.set(display.id, source.id);
+  });
+  screenSources = map;
+  return map;
+}
+
+// Prepare everything the shortcut needs, so opening the picker is instant.
+function warmPicker() {
+  if (!app.isReady() || picking) return;
+  preparePickerPool();
+  if (!screenSources && screenAccess() === 'granted') loadScreenSources().catch(() => { screenSources = null; });
+}
+
+function invalidatePicker() {
+  screenSources = null;
+  pickerPoolStale = true;
+  if (!picking) setTimeout(warmPicker, 500);
+}
+
+function closeCustomPicker() {
+  unregisterPickerEscape();
   pickerResult = null;
+  for (const { window } of pickerPool) {
+    if (window.isDestroyed()) continue;
+    window.webContents.send('picker:end');
+    window.hide();
+  }
 }
 
 function stopPicker() {
   closeCustomPicker();
-  clearInterval(cursorTimer);
-  cursorTimer = null;
-  if (cursorWindow && !cursorWindow.isDestroyed()) cursorWindow.destroy();
-  cursorWindow = null;
-  if (pickerWindow && !pickerWindow.isDestroyed()) pickerWindow.destroy();
-  pickerWindow = null;
   picking = false;
   broadcast();
+  if (pickerPoolStale) setTimeout(warmPicker, 500);
 }
 
-async function runCustomPicker() {
-  let readyTimeout, pickTimeout;
-  let readyToPick = false;
-  try {
-    const displays = screen.getAllDisplays();
-    const sources = await Promise.race([
-      desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } }),
-      new Promise((_, reject) => { readyTimeout = setTimeout(() => reject(new Error('Screen capture could not start.')), 15000); })
-    ]);
-    clearTimeout(readyTimeout);
-    // Without Screen Recording access macOS streams only the wallpaper, which would
-    // give wrong colors. Use the system eyedropper until access is granted.
-    if (process.platform === 'darwin' && !zoomPermissionGranted
-      && systemPreferences.getMediaAccessStatus('screen') !== 'granted') {
-      throw new Error('Screen Recording permission is not granted.');
-    }
-    const cursor = screen.getCursorScreenPoint();
-    const readyPromises = displays.map((display, index) => {
-      const source = sources.find(item => item.display_id === String(display.id))
-        || (sources.length === displays.length ? sources[index] : null);
-      if (!source) throw new Error('Could not find the screen capture source.');
-      const window = new BrowserWindow({
-        x: display.bounds.x, y: display.bounds.y,
-        width: display.bounds.width, height: display.bounds.height,
-        show: false, frame: false, transparent: true,
-        resizable: false, movable: false, skipTaskbar: true,
-        hasShadow: false, backgroundColor: '#00000000',
-        acceptFirstMouse: true,
-        webPreferences: {
-          preload: path.join(__dirname, 'picker-preload.cjs'),
-          contextIsolation: true, nodeIntegration: false, sandbox: true,
-          backgroundThrottling: false
-        }
-      });
-      pickerWindows.push(window);
-      window.setBounds(display.bounds);
-      window.setAlwaysOnTop(true, 'screen-saver');
-      window.setContentProtection(true);
-      if (process.platform === 'darwin') window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-      const ready = new Promise((resolve, reject) => {
-        pickerReady.set(window, { resolve, reject });
-        window.webContents.once('did-fail-load', (_event, _code, message) => reject(new Error(message)));
-        window.loadFile(path.join(__dirname, 'picker.html'), { query: {
-          source: source.id,
-          displayX: String(display.bounds.x),
-          displayY: String(display.bounds.y),
-          displayWidth: String(display.bounds.width),
-          displayHeight: String(display.bounds.height),
-          width: String(Math.round(display.bounds.width * display.scaleFactor)),
-          height: String(Math.round(display.bounds.height * display.scaleFactor)),
-          cursorX: String(cursor.x - display.bounds.x),
-          cursorY: String(cursor.y - display.bounds.y),
-          active: String(display.bounds.x <= cursor.x && cursor.x < display.bounds.x + display.bounds.width
-            && display.bounds.y <= cursor.y && cursor.y < display.bounds.y + display.bounds.height)
-        } }).catch(reject);
-      });
-      return ready;
+async function runCustomPicker(retry = true) {
+  const displays = preparePickerPool();
+  const usedCache = !!screenSources && displays.every(display => screenSources.has(display.id));
+  const sources = usedCache ? screenSources : await loadScreenSources();
+  if (displays.some(display => !sources.has(display.id))) throw new Error('Could not find the screen capture source.');
+  await withTimeout(Promise.all(pickerPool.map(item => item.loaded)), 15000, 'The color picker could not start. Please try again.');
+
+  const session = ++pickerSession;
+  const result = new Promise((resolve, reject) => { pickerResult = { session, resolve, reject }; });
+  const cursor = screen.getCursorScreenPoint();
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
+  registerPickerEscape();
+
+  // Show the overlays right away; each page starts its stream in the background.
+  let activeWindow = pickerPool[0].window;
+  displays.forEach((display, index) => {
+    const { window } = pickerPool[index];
+    const active = containsPoint(display.bounds, cursor);
+    if (active) activeWindow = window;
+    window.setBounds(display.bounds);
+    window.webContents.send('picker:begin', {
+      session,
+      source: sources.get(display.id),
+      display: display.bounds,
+      width: Math.round(display.bounds.width * display.scaleFactor),
+      height: Math.round(display.bounds.height * display.scaleFactor),
+      cursorX: cursor.x - display.bounds.x,
+      cursorY: cursor.y - display.bounds.y,
+      active
     });
-    await Promise.race([
-      Promise.all(readyPromises),
-      new Promise((_, reject) => { readyTimeout = setTimeout(() => reject(new Error('Zoom preview could not start.')), 60000); })
-    ]);
-    readyToPick = true;
-    zoomPermissionGranted = true;
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
-    await new Promise(resolve => setTimeout(resolve, 80));
-    const result = new Promise(resolve => { pickerResult = resolve; });
-    registerPickerEscape();
-    for (const window of pickerWindows) window.showInactive();
-    const point = screen.getCursorScreenPoint();
-    const active = pickerWindows[displays.findIndex(display => display.bounds.x <= point.x
-      && point.x < display.bounds.x + display.bounds.width
-      && display.bounds.y <= point.y && point.y < display.bounds.y + display.bounds.height)] || pickerWindows[0];
-    active.focus();
-    return await Promise.race([
-      result,
-      new Promise((_, reject) => { pickTimeout = setTimeout(() => reject(new Error('Color picker took too long. Please try again.')), 60000); })
-    ]);
+    window.showInactive();
+  });
+  // The shortcut usually fires while another app is in front; take keyboard focus so
+  // arrow-key nudging, Enter and Escape reach the picker.
+  if (process.platform === 'darwin') app.focus({ steal: true });
+  activeWindow.focus();
+
+  try {
+    return await withTimeout(result, 60000, 'Color picker took too long. Please try again.');
   } catch (error) {
     closeCustomPicker();
-    if (!readyToPick) throw Object.assign(new Error(error?.message || 'Zoom preview unavailable.'), { code: 'zoom-unavailable' });
+    // A cached source can go stale (for example after a display change); refresh once.
+    if (error.code === 'capture-failed' && usedCache && retry) {
+      screenSources = null;
+      return runCustomPicker(false);
+    }
     throw error;
-  } finally {
-    clearTimeout(readyTimeout);
-    clearTimeout(pickTimeout);
   }
 }
 
-async function showPickerPointer() {
-  const size = 40;
-  const window = new BrowserWindow({
-    show: false, width: size, height: size,
-    frame: false, transparent: true, focusable: false,
-    resizable: false, movable: false, skipTaskbar: true,
-    hasShadow: false, backgroundColor: '#00000000',
-    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
-  });
-  cursorWindow = window;
-  window.setAlwaysOnTop(true, 'screen-saver');
-  window.setIgnoreMouseEvents(true);
-  window.setContentProtection(true);
-  if (process.platform === 'darwin') window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  await window.loadFile(path.join(__dirname, 'cursor.html'));
-  if (window.isDestroyed()) return;
-
-  let previousX, previousY;
-  const move = () => {
-    if (window.isDestroyed()) return;
-    const point = screen.getCursorScreenPoint();
-    const display = screen.getDisplayNearestPoint(point);
-    const area = display.bounds;
-    const x = point.x + 56 + size <= area.x + area.width ? point.x + 56 : point.x - 56 - size;
-    const y = point.y + 16 + size <= area.y + area.height ? point.y + 16 : point.y - 16 - size;
-    if (x === previousX && y === previousY) return;
-    previousX = x;
-    previousY = y;
-    window.setPosition(Math.round(x), Math.round(y), false);
-  };
-  move();
-  window.showInactive();
-  cursorTimer = setInterval(move, 33);
-}
-
-async function runNativePicker() {
-  const cursor = screen.getCursorScreenPoint();
-  const display = screen.getDisplayNearestPoint(cursor);
-  const size = 48;
-  const x = cursor.x < display.bounds.x + display.bounds.width / 2
-    ? display.bounds.x + display.bounds.width - size : display.bounds.x;
-  const y = cursor.y < display.bounds.y + display.bounds.height / 2
-    ? display.bounds.y + display.bounds.height - size : display.bounds.y;
-  const window = new BrowserWindow(windowOptions({
-      x, y, width: size, height: size,
-      frame: false, transparent: true, resizable: false, movable: false,
-      alwaysOnTop: true, skipTaskbar: true, hasShadow: false,
-      backgroundColor: '#00000000'
-  }));
-  pickerWindow = window;
-  await window.loadFile(path.join(__dirname, 'native-picker.html'));
-  if (process.platform === 'darwin') window.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-  window.show();
-  window.focus();
-  let timer;
-  try {
-    const result = Promise.race([
-      window.webContents.executeJavaScript(`(async () => {
-      if (!('EyeDropper' in window)) return { ok: false, name: 'NotSupportedError' };
-      try { return { ok: true, hex: (await new EyeDropper().open()).sRGBHex }; }
-      catch (error) { return { ok: false, name: error.name }; }
-      })()`, true),
-      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Color picker took too long. Please try again.')), 60000); })
-    ]);
-    await showPickerPointer().catch(error => console.warn('Could not show picker pointer:', error));
-    return await result;
-  } finally { clearTimeout(timer); }
+// Reading other apps' pixels on macOS needs Screen Recording access. Without it the
+// stream shows only the wallpaper, so picking would return wrong colors.
+async function ensureScreenAccess() {
+  if (screenAccess() === 'granted') return;
+  // Adds Color Picker to the Screen Recording list and, the first time, shows the macOS prompt.
+  await desktopCapturer.getSources({ types: ['screen'], thumbnailSize: { width: 0, height: 0 } }).catch(() => {});
+  if (screenAccess() === 'granted') return;
+  throw Object.assign(new Error('Allow Screen Recording for Color Picker, then restart the app.'), { code: 'screen-permission' });
 }
 
 async function startPicker() {
@@ -396,36 +430,21 @@ async function startPicker() {
   restoreMainAfterCancel = !!(mainWindow && mainWindow.isVisible());
   closePopup();
   try {
-    let result;
-    const permission = process.platform === 'darwin' && !zoomPermissionGranted
-      ? systemPreferences.getMediaAccessStatus('screen') : 'granted';
-    if (permission === 'denied' || permission === 'restricted') {
-      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
-      result = await runNativePicker();
-    } else {
-      try { result = await runCustomPicker(); }
-      catch (error) {
-        if (error.code !== 'zoom-unavailable') throw error;
-        console.warn('Custom zoom unavailable; using the system eyedropper:', error);
-        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.hide();
-        result = await runNativePicker();
-      }
-    }
+    await ensureScreenAccess();
+    const result = await runCustomPicker();
     stopPicker();
     if (result.ok) {
       chooseColor(result.hex, true);
       showPopup();
       return { ok: true };
     }
-    if (result.name === 'AbortError') {
-      if (restoreMainAfterCancel) showMain();
-      return { ok: false, cancelled: true };
-    }
-    throw new Error(result.name === 'NotSupportedError' ? 'Direct color picking is unavailable on this system.' : 'Could not pick a color. Please try again.');
+    if (restoreMainAfterCancel) showMain();
+    else if (process.platform === 'darwin') app.hide(); // hand focus back to the previous app
+    return { ok: false, cancelled: true };
   } catch (error) {
     stopPicker();
     showMain();
-    const result = { ok: false, code: 'picker-failed', error: error?.message || 'Color picking failed.' };
+    const result = { ok: false, code: error?.code || 'picker-failed', error: error?.message || 'Color picking failed.' };
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send('picker:error', result);
     return result;
   }
@@ -444,6 +463,10 @@ function chooseColor(hex, addRecent = false, keepToneBase = false) {
 app.whenReady().then(() => {
   if (!primaryInstance) return;
   loadState();
+  nativeTheme.themeSource = data.theme;
+  nativeTheme.on('updated', () => {
+    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setBackgroundColor(windowBackground());
+  });
   if (!registerShortcut(data.shortcut)) {
     const alternatives = [DEFAULT_SHORTCUT, 'CommandOrControl+Alt+P', 'CommandOrControl+Shift+8'];
     const available = alternatives.find(value => value !== data.shortcut && registerShortcut(value));
@@ -453,28 +476,24 @@ app.whenReady().then(() => {
   tray = new Tray(icon());
   tray.on('click', showMain);
   updateTray();
+  for (const change of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(change, invalidatePicker);
+  setTimeout(warmPicker, 1200);
 
-  ipcMain.on('picker:ready', event => {
-    const window = BrowserWindow.fromWebContents(event.sender);
-    const pending = pickerReady.get(window);
-    if (pending) { pickerReady.delete(window); pending.resolve(); }
+  const fromPicker = event => pickerPool.some(item => !item.window.isDestroyed() && item.window.webContents === event.sender);
+  ipcMain.on('picker:ready', event => { if (fromPicker(event)) zoomPermissionGranted = true; });
+  ipcMain.on('picker:failed', (event, session, message) => {
+    if (!fromPicker(event)) return;
+    console.warn('Picker stream failed:', message);
+    screenSources = null;
+    failPicker(session, Object.assign(new Error('Screen capture could not start. Please try again.'), { code: 'capture-failed' }));
   });
-  ipcMain.on('picker:failed', (event, message) => {
-    const window = BrowserWindow.fromWebContents(event.sender);
-    const pending = pickerReady.get(window);
-    if (pending) { pickerReady.delete(window); pending.reject(new Error(String(message || 'Zoom preview failed.'))); }
-  });
-  ipcMain.on('picker:choose', (event, hex) => {
-    if (!pickerWindows.includes(BrowserWindow.fromWebContents(event.sender)) || !pickerResult) return;
+  ipcMain.on('picker:choose', (event, session, hex) => {
+    if (!fromPicker(event)) return;
     const clean = normalizeHex(hex);
-    if (!clean) return;
-    const resolve = pickerResult;
-    pickerResult = null;
-    resolve({ ok: true, hex: clean });
+    if (clean) settlePicker(session, { ok: true, hex: clean });
   });
-  ipcMain.on('picker:cancel', event => {
-    if (!pickerWindows.includes(BrowserWindow.fromWebContents(event.sender))) return;
-    cancelCustomPicker();
+  ipcMain.on('picker:cancel', (event, session) => {
+    if (fromPicker(event)) settlePicker(session, { ok: false, name: 'AbortError' });
   });
 
   ipcMain.handle('state:get', () => state());
@@ -495,6 +514,7 @@ app.whenReady().then(() => {
   ipcMain.handle('shortcut:set', (_event, value) => setShortcut(value));
   ipcMain.handle('shortcut:reset', () => setShortcut(DEFAULT_SHORTCUT));
   ipcMain.handle('shortcut:editing', (_event, value) => setShortcutEditing(value));
+  ipcMain.handle('theme:set', (_event, theme) => setTheme(theme));
   ipcMain.handle('clipboard:write', (_event, value) => {
     if (typeof value !== 'string' || value.length > 200) return { ok: false };
     clipboard.writeText(value); return { ok: true };
@@ -503,6 +523,8 @@ app.whenReady().then(() => {
   ipcMain.handle('screen:settings', () => process.platform === 'darwin'
     ? shell.openExternal('x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture')
     : Promise.resolve());
+  // macOS applies a new Screen Recording permission only after the app restarts.
+  ipcMain.handle('app:relaunch', () => { quitting = true; app.relaunch(); app.quit(); });
 });
 
 app.on('activate', () => { if (!picking) showMain(); });
