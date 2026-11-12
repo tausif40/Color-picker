@@ -10,11 +10,17 @@ A compact macOS and Windows color picker with a global shortcut, a live screen p
    - **Arrow keys** move one screen pixel (**Shift + arrow** moves ten).
    - **Scroll** or **+ / −** zooms the loupe in and out.
    - **Escape** or right click cancels. The popup opens in the center of that display.
-4. In the popup, click a light-to-dark shade to show that shade's **HEX**, **HEXA**, **RGB**, **HSLA**, and **CMYK** codes. Selecting a shade does not change the clipboard. Click any code to copy it; its icon briefly turns into a green check, without a copied toast. Save the selected shade if you want to keep it.
+4. In the popup, click a light-to-dark shade to show that shade's **HEX**, **HEXA**, **RGB**, **HSLA**, and **CMYK** codes. Selecting a shade does not change the clipboard. Click any code, or the copy button next to **Save**, to copy it; its icon briefly turns into a check, without a copied toast. Save the selected shade if you want to keep it.
 5. Under **Settings**, click the shortcut field, press a key combination such as **Option+C** or a single key such as **F8**, and click **Save**. Use **Reset to default** to restore the original shortcut.
-6. Under **Settings → Appearance**, choose **System** (default, follows your Mac), **Light**, or **Dark**.
+6. Under **Palette** (third tab), build a color palette of **2 to 8** flat colors shown as equal-width blocks that always fill the full width. **Add color** creates a new color related to the last one (the next step around the color wheel, same saturation, balanced lightness). Hover a block to change it (✎, opens the color panel) or remove it (×); drag blocks to reorder them, or use **Reverse** / **Shuffle**. Click a block to copy its HEX straight to the clipboard. **Copy** copies the whole palette as a HEX list, CSS variables, or JSON. **Save** keeps the palette under **Saved palettes** (up to 100) — click one to open it again, drag it by its handle to reorder the list, or copy/delete it. After deleting, **Undo** in the toast restores it for 5 seconds.
+7. Under **Settings**, choose the appearance (**System**, the default, follows your Mac; or **Light** / **Dark**, which also applies to the result popup), and turn on:
+   - **Open at login** to start Color Picker automatically after you log in or restart. It registers the installed app, so turn it on from the copy in `/Applications`.
+   - **Start in menu bar** to skip opening the window at launch (use the shortcut or the menu bar icon).
+   - **Show menu bar icon** to bring the icon back after hiding it with **Hide Menu Bar Icon** in the icon's own menu.
 
-The main window has a fixed size with the **Picker**, **Saved**, and **Settings** tabs at the bottom; everything fits without scrolling (only a long list of saved colors scrolls inside its grid). On macOS it uses the native close and minimize buttons; zoom/full screen is disabled.
+Up to **250** colors can be saved; when the list is full, remove one before saving another. **Save current** on the Saved page saves the color shown on the Picker page (the button shows that color). The app remembers your last **24** picks and shows the latest **12** under Recent picks. **Settings → About** shows the app's details (version, platform, shortcut, limits) and, at the end, the developer's contact details.
+
+The main window has a fixed size with the **Picker**, **Saved**, **Palette**, and **Settings** tabs at the bottom; everything fits without scrolling (only a long list of saved colors scrolls inside its grid). On macOS it uses the native close and minimize buttons; zoom/full screen is disabled.
 
 Screen colors are opaque, so HEXA ends in `FF` and HSLA has alpha `1`. The requested HSA format is shown as the standard **HSLA** form (hue, saturation, lightness, alpha). CMYK is a calculated screen-color approximation; print workflows should use a printer profile for final output.
 

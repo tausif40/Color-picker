@@ -22,6 +22,13 @@ contextBridge.exposeInMainWorld('colorPicker', {
   openScreenSettings: () => ipcRenderer.invoke('screen:settings'),
   relaunch: () => ipcRenderer.invoke('app:relaunch'),
   setTheme: theme => ipcRenderer.invoke('theme:set', theme),
+  setPreference: (key, value) => ipcRenderer.invoke('preference:set', key, value),
+  openLink: url => ipcRenderer.invoke('link:open', url),
+  setPattern: pattern => ipcRenderer.invoke('pattern:set', pattern),
+  savePattern: pattern => ipcRenderer.invoke('patterns:save', pattern),
+  removePattern: id => ipcRenderer.invoke('patterns:remove', id),
+  restorePattern: (pattern, index) => ipcRenderer.invoke('patterns:restore', pattern, index),
+  reorderPatterns: ids => ipcRenderer.invoke('patterns:reorder', ids),
   onState: callback => on('state:changed', callback),
   onPickerError: callback => on('picker:error', callback)
 });

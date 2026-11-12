@@ -7,6 +7,13 @@ const { normalizeShortcut } = require('./shortcut.cjs');
 const DEFAULT_SHORTCUT = 'CommandOrControl+Shift+P';
 const DEFAULT_COLOR = '#7C5CFF';
 const THEMES = ['system', 'light', 'dark'];
+const MAX_SAVED = 250;
+const MAX_SAVED_PATTERNS = 100;
+const DEFAULT_PATTERN = { colors: ['#2E4756', '#4F9A8F', '#E2C577', '#E8A66C', '#D8765A'] };
+const MAX_RECENT = 24;
+// Shown in Settings → Developer. Links opened from the app are limited to these.
+const DEVELOPER = { name: 'Tausif', email: 'tausif6040@gmail.com', portfolio: 'https://tausif.info' };
+const ALLOWED_LINKS = new Set([`mailto:${DEVELOPER.email}`, DEVELOPER.portfolio]);
 const preload = path.join(__dirname, 'preload.cjs');
 let mainWindow, popupWindow, tray;
 // Picker overlays (one per display) are created ahead of time and kept hidden, and the
@@ -23,6 +30,7 @@ let quitting = false;
 let shortcutAvailable = false;
 let shortcutEditing = false;
 let pickerEscapeRegistered = false;
+let showOnLaunch = true;
 let data;
 
 const primaryInstance = app.requestSingleInstanceLock();
@@ -38,9 +46,32 @@ function screenAccess() {
 function state() {
   return {
     ...data, platform: process.platform, picking, shortcutAvailable, shortcutEditing,
-    screenPermission: screenAccess()
+    screenPermission: screenAccess(),
+    openAtLogin: loginItemEnabled(),
+    version: app.getVersion(),
+    developer: DEVELOPER,
+    maxSaved: MAX_SAVED,
+    maxRecent: MAX_RECENT,
+    maxSavedPatterns: MAX_SAVED_PATTERNS,
+    arch: process.arch
   };
 }
+
+// A palette (color pattern) is 2–8 colors shown as equal-width blocks.
+function cleanPattern(value) {
+  if (!value || !Array.isArray(value.colors)) return null;
+  const colors = value.colors.map(normalizeHex).filter(Boolean).slice(0, 8);
+  return colors.length >= 2 ? { colors } : null;
+}
+
+function cleanSavedPattern(value) {
+  const pattern = cleanPattern(value);
+  if (!pattern) return null;
+  const id = typeof value.id === 'string' && /^[\w-]{1,40}$/.test(value.id) ? value.id : newId();
+  return { id, colors: pattern.colors };
+}
+
+function newId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
 
 // Colors saved before the app was renamed from Prism Pick live in its old data folder.
 function readSavedState() {
@@ -58,14 +89,19 @@ function loadState() {
     data = {
       selected: normalizeHex(saved.selected) || DEFAULT_COLOR,
       toneBase: normalizeHex(saved.toneBase) || normalizeHex(saved.selected) || DEFAULT_COLOR,
-      recent: Array.isArray(saved.recent) ? saved.recent.map(normalizeHex).filter(Boolean).slice(0, 24) : [],
-      palette: Array.isArray(saved.palette) ? [...new Set(saved.palette.map(normalizeHex).filter(Boolean))].slice(0, 100) : [],
+      recent: Array.isArray(saved.recent) ? saved.recent.map(normalizeHex).filter(Boolean).slice(0, MAX_RECENT) : [],
+      palette: Array.isArray(saved.palette) ? [...new Set(saved.palette.map(normalizeHex).filter(Boolean))].slice(0, MAX_SAVED) : [],
       shortcut: normalizeShortcut(saved.shortcut) || DEFAULT_SHORTCUT,
-      theme: THEMES.includes(saved.theme) ? saved.theme : 'system'
+      theme: THEMES.includes(saved.theme) ? saved.theme : 'system',
+      startHidden: saved.startHidden === true,
+      showTrayIcon: saved.showTrayIcon !== false,
+      // Earlier versions stored a gradient; reuse its colors for the palette.
+      pattern: cleanPattern(saved.pattern) || cleanPattern({ colors: saved.gradient?.stops }) || DEFAULT_PATTERN,
+      savedPatterns: Array.isArray(saved.savedPatterns) ? saved.savedPatterns.map(cleanSavedPattern).filter(Boolean).slice(0, MAX_SAVED_PATTERNS) : []
     };
     if (!fs.existsSync(statePath())) saveState();
   } catch {
-    data = { selected: DEFAULT_COLOR, toneBase: DEFAULT_COLOR, recent: [], palette: [], shortcut: DEFAULT_SHORTCUT, theme: 'system' };
+    data = { selected: DEFAULT_COLOR, toneBase: DEFAULT_COLOR, recent: [], palette: [], shortcut: DEFAULT_SHORTCUT, theme: 'system', startHidden: false, showTrayIcon: true, pattern: DEFAULT_PATTERN, savedPatterns: [] };
   }
 }
 
@@ -85,7 +121,28 @@ function broadcast() {
   updateTray();
 }
 
+// Open at login: macOS Login Items / Windows startup entry for this app.
+function loginItemEnabled() {
+  try { return app.getLoginItemSettings().openAtLogin; } catch { return false; }
+}
+
+function setPreference(key, value) {
+  const enabled = !!value;
+  if (key === 'openAtLogin') {
+    try { app.setLoginItemSettings({ openAtLogin: enabled }); }
+    catch (error) { return { ok: false, error: 'Could not change the login item.' }; }
+    broadcast();
+    return { ok: true, value: loginItemEnabled() };
+  }
+  if (key === 'startHidden') data.startHidden = enabled;
+  else if (key === 'showTrayIcon') setTrayVisible(enabled);
+  else return { ok: false };
+  saveState(); broadcast();
+  return { ok: true, value: enabled };
+}
+
 function windowBackground() { return nativeTheme.shouldUseDarkColors ? '#1B1B1E' : '#F4F4F7'; }
+function popupBackground() { return nativeTheme.shouldUseDarkColors ? '#26262A' : '#FFFFFF'; }
 
 // 'system' follows macOS/Windows appearance; 'light' and 'dark' override it for the app.
 function setTheme(theme) {
@@ -108,7 +165,7 @@ function windowOptions(extra = {}) {
 function createMain() {
   mainWindow = new BrowserWindow(windowOptions({
     // Fixed size: every section is laid out to fit without scrolling.
-    width: 480, height: 646, resizable: false,
+    width: 480, height: 662, resizable: false,
     title: 'Color Picker', icon: path.join(__dirname, '..', 'assets', 'app.png'),
     // Native macOS close and minimize buttons; the green zoom/full-screen button is disabled.
     titleBarStyle: process.platform === 'darwin' ? 'hidden' : 'default',
@@ -118,7 +175,7 @@ function createMain() {
     autoHideMenuBar: true
   }));
   mainWindow.loadFile(path.join(__dirname, 'index.html'));
-  mainWindow.once('ready-to-show', () => mainWindow.show());
+  mainWindow.once('ready-to-show', () => { if (showOnLaunch) mainWindow.show(); showOnLaunch = true; });
   mainWindow.on('blur', () => { if (shortcutEditing) setShortcutEditing(false); });
   mainWindow.on('close', event => {
     if (!quitting) { event.preventDefault(); mainWindow.hide(); }
@@ -142,14 +199,14 @@ function showPopup() {
   closePopup();
   const cursor = screen.getCursorScreenPoint();
   const display = screen.getDisplayNearestPoint(cursor);
-  const width = 340, height = 370;
+  const width = 340, height = 340;
   const area = display.workArea;
   const x = Math.round(area.x + (area.width - width) / 2);
   const y = Math.round(area.y + (area.height - height) / 2);
   const window = new BrowserWindow(windowOptions({
     width, height, x, y, frame: false, resizable: false,
     skipTaskbar: true, alwaysOnTop: true, hasShadow: true,
-    backgroundColor: '#FFFFFF'
+    backgroundColor: popupBackground()
   }));
   popupWindow = window;
   // Keep the popup on the space that was just picked from, including full-screen apps.
@@ -178,12 +235,28 @@ function icon() {
   return image;
 }
 
+const TRAY_NAME = process.platform === 'darwin' ? 'Menu Bar Icon' : 'Tray Icon';
+
+function setTrayVisible(visible) {
+  data.showTrayIcon = !!visible;
+  if (visible && !tray) {
+    tray = new Tray(icon());
+    tray.on('click', showMain);
+  } else if (!visible && tray) {
+    tray.destroy();
+    tray = null;
+  }
+  updateTray();
+}
+
 function updateTray() {
   if (!tray) return;
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: 'Open Color Picker', click: showMain },
     { label: `Pick color  ·  ${data.shortcut}`, click: startPicker },
     { type: 'separator' },
+    // Brings it back: Settings → General → Show menu bar icon.
+    { label: `Hide ${TRAY_NAME}`, click: () => { setTrayVisible(false); saveState(); broadcast(); } },
     { label: 'Quit Color Picker', click: () => { quitting = true; app.quit(); } }
   ]));
   tray.setToolTip(`Color Picker — ${data.shortcut}`);
@@ -455,7 +528,7 @@ function chooseColor(hex, addRecent = false, keepToneBase = false) {
   if (!clean) return { ok: false, error: 'Invalid color.' };
   data.selected = clean;
   if (!keepToneBase) data.toneBase = clean;
-  if (addRecent) data.recent = [clean, ...data.recent.filter(item => item !== clean)].slice(0, 24);
+  if (addRecent) data.recent = [clean, ...data.recent.filter(item => item !== clean)].slice(0, MAX_RECENT);
   saveState(); broadcast();
   return { ok: true, color: clean };
 }
@@ -466,16 +539,20 @@ app.whenReady().then(() => {
   nativeTheme.themeSource = data.theme;
   nativeTheme.on('updated', () => {
     if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setBackgroundColor(windowBackground());
+    if (popupWindow && !popupWindow.isDestroyed()) popupWindow.setBackgroundColor(popupBackground());
   });
   if (!registerShortcut(data.shortcut)) {
     const alternatives = [DEFAULT_SHORTCUT, 'CommandOrControl+Alt+P', 'CommandOrControl+Shift+8'];
     const available = alternatives.find(value => value !== data.shortcut && registerShortcut(value));
     if (available) { data.shortcut = available; saveState(); }
   }
+  showOnLaunch = !data.startHidden;
+  if (data.startHidden) {
+    ignoreLaunchActivate = true;
+    setTimeout(() => { ignoreLaunchActivate = false; }, 2500);
+  }
   createMain();
-  tray = new Tray(icon());
-  tray.on('click', showMain);
-  updateTray();
+  setTrayVisible(data.showTrayIcon);
   for (const change of ['display-added', 'display-removed', 'display-metrics-changed']) screen.on(change, invalidatePicker);
   setTimeout(warmPicker, 1200);
 
@@ -503,7 +580,10 @@ app.whenReady().then(() => {
   ipcMain.handle('palette:save', (_event, hex) => {
     const clean = normalizeHex(hex);
     if (!clean) return { ok: false };
-    data.palette = [clean, ...data.palette.filter(item => item !== clean)].slice(0, 100);
+    if (data.palette.includes(clean)) return { ok: true, already: true };
+    // Never drop an older color silently; ask the user to make room instead.
+    if (data.palette.length >= MAX_SAVED) return { ok: false, error: `Saved colors are full (${MAX_SAVED}). Remove one first.` };
+    data.palette = [clean, ...data.palette];
     saveState(); broadcast(); return { ok: true };
   });
   ipcMain.handle('palette:remove', (_event, hex) => {
@@ -515,6 +595,55 @@ app.whenReady().then(() => {
   ipcMain.handle('shortcut:reset', () => setShortcut(DEFAULT_SHORTCUT));
   ipcMain.handle('shortcut:editing', (_event, value) => setShortcutEditing(value));
   ipcMain.handle('theme:set', (_event, theme) => setTheme(theme));
+  ipcMain.handle('preference:set', (_event, key, value) => setPreference(key, value));
+  // Only the main window shows the palette, so this saves without a broadcast.
+  ipcMain.handle('pattern:set', (_event, value) => {
+    const pattern = cleanPattern(value);
+    if (!pattern) return { ok: false };
+    data.pattern = pattern;
+    saveState();
+    return { ok: true, pattern };
+  });
+  // Saved palettes, kept for later (newest first).
+  ipcMain.handle('patterns:save', (_event, value) => {
+    const pattern = cleanPattern(value);
+    if (!pattern) return { ok: false, error: 'A palette needs 2 to 8 colors.' };
+    const key = pattern.colors.join();
+    if (data.savedPatterns.some(item => item.colors.join() === key)) return { ok: true, already: true };
+    if (data.savedPatterns.length >= MAX_SAVED_PATTERNS) return { ok: false, error: `Saved palettes are full (${MAX_SAVED_PATTERNS}). Remove one first.` };
+    data.savedPatterns = [{ id: newId(), colors: pattern.colors }, ...data.savedPatterns];
+    saveState(); broadcast();
+    return { ok: true };
+  });
+  ipcMain.handle('patterns:remove', (_event, id) => {
+    data.savedPatterns = data.savedPatterns.filter(item => item.id !== id);
+    saveState(); broadcast();
+    return { ok: true };
+  });
+  // Undo for a delete: put the palette back where it was.
+  ipcMain.handle('patterns:restore', (_event, value, index) => {
+    const item = cleanSavedPattern(value);
+    if (!item || data.savedPatterns.some(saved => saved.id === item.id)) return { ok: false };
+    if (data.savedPatterns.length >= MAX_SAVED_PATTERNS) return { ok: false, error: `Saved palettes are full (${MAX_SAVED_PATTERNS}).` };
+    const at = Number.isInteger(index) ? Math.max(0, Math.min(index, data.savedPatterns.length)) : 0;
+    data.savedPatterns.splice(at, 0, item);
+    saveState(); broadcast();
+    return { ok: true };
+  });
+  // Drag to reorder: the renderer sends the ids in their new order.
+  ipcMain.handle('patterns:reorder', (_event, ids) => {
+    if (!Array.isArray(ids) || ids.length !== data.savedPatterns.length) return { ok: false };
+    const byId = new Map(data.savedPatterns.map(item => [item.id, item]));
+    const next = ids.map(id => byId.get(id));
+    if (next.some(item => !item) || new Set(ids).size !== ids.length) return { ok: false };
+    data.savedPatterns = next;
+    saveState(); broadcast();
+    return { ok: true };
+  });
+  ipcMain.handle('link:open', (_event, url) => {
+    if (!ALLOWED_LINKS.has(url)) return { ok: false };
+    return shell.openExternal(url).then(() => ({ ok: true }), () => ({ ok: false }));
+  });
   ipcMain.handle('clipboard:write', (_event, value) => {
     if (typeof value !== 'string' || value.length > 200) return { ok: false };
     clipboard.writeText(value); return { ok: true };
@@ -527,7 +656,12 @@ app.whenReady().then(() => {
   ipcMain.handle('app:relaunch', () => { quitting = true; app.relaunch(); app.quit(); });
 });
 
-app.on('activate', () => { if (!picking) showMain(); });
+// macOS can send 'activate' as part of launching; when starting hidden, ignore that one.
+let ignoreLaunchActivate = false;
+app.on('activate', () => {
+  if (ignoreLaunchActivate) { ignoreLaunchActivate = false; return; }
+  if (!picking) showMain();
+});
 app.on('browser-window-focus', () => { if (data) broadcast(); });
 app.on('before-quit', () => { quitting = true; globalShortcut.unregisterAll(); });
 app.on('window-all-closed', () => {});

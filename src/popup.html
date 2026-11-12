@@ -8,13 +8,33 @@
   <link rel="stylesheet" href="styles.css">
 </head>
 <body class="popup-body">
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+    <defs>
+      <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2.5"/><path d="M5 15V6.5A2.5 2.5 0 0 1 7.5 4H15"/></symbol>
+      <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+      <symbol id="i-bookmark" viewBox="0 0 24 24"><path d="M7 4h10a1 1 0 0 1 1 1v15l-6-4-6 4V5a1 1 0 0 1 1-1Z"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="M7 7l10 10M17 7 7 17"/></symbol>
+    </defs>
+  </svg>
+
   <div class="popup-shell">
-    <header class="popup-header"><div><span class="app-logo tiny" aria-hidden="true"><i></i></span><strong>Color picked</strong></div><button id="popup-close" aria-label="Close popup">×</button></header>
-    <div class="popup-preview" id="popup-preview"><div><span>SELECTED COLOR</span><strong id="popup-hex">#7C5CFF</strong></div><button id="popup-save">＋ Save</button></div>
+    <header class="popup-header">
+      <div class="popup-title"><span class="app-logo tiny" aria-hidden="true"></span><strong>Color picked</strong></div>
+      <button id="popup-close" class="popup-close" aria-label="Close popup"><svg class="icon"><use href="#i-close"/></svg></button>
+    </header>
+
+    <div class="popup-preview" id="popup-preview">
+      <div class="popup-value"><span>Selected color</span><strong id="popup-hex">#7C5CFF</strong></div>
+      <div class="popup-actions">
+        <button id="popup-save" class="popup-save"><svg class="icon"><use href="#i-bookmark"/></svg><span id="popup-save-label">Save</span></button>
+        <button id="popup-copy" class="popup-save popup-icon-button" title="Copy HEX" aria-label="Copy HEX"><svg class="icon copy-icon"><use href="#i-copy"/></svg></button>
+      </div>
+    </div>
+
     <div class="popup-content">
       <div class="popup-section-title"><strong>Color codes</strong><span>Click to copy</span></div>
       <div class="popup-formats" id="popup-formats"></div>
-      <div class="popup-section-title tones-title"><strong>Light to dark</strong><span>Select to see codes</span></div>
+      <div class="popup-section-title"><strong>Light to dark</strong><span>Select a shade</span></div>
       <div class="popup-tones" id="popup-tones"></div>
     </div>
     <div class="popup-toast" id="popup-toast" role="status"></div>
