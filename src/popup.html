@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'none'">
+  <title>Picked color</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="popup-body">
+  <div class="popup-shell">
+    <header class="popup-header"><div><span class="app-logo tiny" aria-hidden="true"><i></i></span><strong>Color picked</strong></div><button id="popup-close" aria-label="Close popup">×</button></header>
+    <div class="popup-preview" id="popup-preview"><div><span>SELECTED COLOR</span><strong id="popup-hex">#7C5CFF</strong></div><button id="popup-save">＋ Save</button></div>
+    <div class="popup-content">
+      <div class="popup-section-title"><strong>Color codes</strong><span>Click to copy</span></div>
+      <div class="popup-formats" id="popup-formats"></div>
+      <div class="popup-section-title tones-title"><strong>Light to dark</strong><span>Select to see codes</span></div>
+      <div class="popup-tones" id="popup-tones"></div>
+    </div>
+    <div class="popup-toast" id="popup-toast" role="status"></div>
+  </div>
+  <script src="color-ui.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>

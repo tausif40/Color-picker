@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'">
+  <title>Pick a color</title>
+  <style>
+    html, body { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; cursor: none; user-select: none; }
+    #feed { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+    [hidden] { display: none !important; }
+    #pointer { position: absolute; width: 32px; height: 38px; pointer-events: none; filter: drop-shadow(0 2px 2px #15192399); }
+    #pointer svg { width: 100%; height: 100%; }
+    #bubble { position: absolute; width: 146px; padding: 7px; box-sizing: border-box; border: 1px solid #d8dce6; border-radius: 13px; background: #fff; box-shadow: 0 12px 35px #15192366; pointer-events: none; }
+    #zoom { width: 130px; height: 130px; display: block; border-radius: 7px; background: #f1f2f5; image-rendering: pixelated; }
+    #color-row { height: 25px; display: flex; align-items: center; gap: 6px; color: #222733; font: 700 11px system-ui, sans-serif; }
+    #swatch { width: 13px; height: 13px; border-radius: 4px; border: 1px solid #0002; }
+    #hex { flex: 1; }
+    #hint { font: 9px system-ui, sans-serif; font-weight: 600; color: #929aa7; }
+  </style>
+</head>
+<body>
+  <video id="feed" autoplay muted playsinline></video>
+  <div id="pointer" aria-hidden="true"><svg viewBox="0 0 32 38" xmlns="http://www.w3.org/2000/svg"><path d="M3 2.5v29l7.3-7.4 5.8 11.1 5.1-2.7-5.8-11.1h10.1L3 2.5Z" fill="#fff" stroke="#242631" stroke-width="2.2" stroke-linejoin="round"/></svg></div>
+  <div id="bubble" aria-hidden="true"><canvas id="zoom" width="130" height="130"></canvas><div id="color-row"><i id="swatch"></i><span id="hex">Move to a color</span><span id="hint">Click</span></div></div>
+  <script src="picker.js"></script>
+</body>
+</html>

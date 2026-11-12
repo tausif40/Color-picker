@@ -1,0 +1,57 @@
+{
+  "name": "prism-pick",
+  "version": "1.2.3",
+  "private": true,
+  "description": "A fast, cross-platform screen color picker and palette manager",
+  "author": "Prism Pick",
+  "main": "src/main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "icons": "electron scripts/generate-icons.cjs",
+    "pack:mac": "electron-builder --mac dmg zip --arm64",
+    "pack:mac:intel": "electron-builder --mac dmg zip --x64",
+    "pack:win": "electron-builder --win zip --x64",
+    "pack:win:small": "electron-builder --win 7z --x64",
+    "pack:win:installer": "electron-builder --win nsis portable --x64"
+  },
+  "devDependencies": {
+    "electron": "^38.0.0",
+    "electron-builder": "^26.0.12"
+  },
+  "build": {
+    "appId": "com.prismpick.desktop",
+    "productName": "Prism Pick",
+    "electronLanguages": [
+      "en-US"
+    ],
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "src/**/*",
+      "assets/**/*",
+      "package.json"
+    ],
+    "mac": {
+      "category": "public.app-category.graphics-design",
+      "icon": "assets/app.icns",
+      "extendInfo": {
+        "NSScreenCaptureUsageDescription": "Prism Pick uses a live screen preview to magnify the pixel under the pointer while you pick a color."
+      },
+      "target": [
+        "dmg",
+        "zip"
+      ]
+    },
+    "win": {
+      "icon": "assets/app.ico",
+      "target": [
+        "zip"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}

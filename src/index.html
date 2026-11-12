@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'none'">
+  <title>Prism Pick</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="main-body">
+  <div class="app-frame">
+    <header class="app-header">
+      <span class="app-logo" aria-hidden="true"><i></i></span>
+      <div class="app-title"><strong>Prism Pick</strong><small>Color picker</small></div>
+      <span class="app-status"><i></i> Ready</span>
+    </header>
+
+    <nav class="tabs" aria-label="Main sections">
+      <button class="tab active" data-view="picker">Picker</button>
+      <button class="tab" data-view="palette">Saved <span id="palette-count">0</span></button>
+      <button class="tab" data-view="settings">Settings</button>
+    </nav>
+
+    <main class="app-content">
+      <section class="view active" id="view-picker">
+        <div class="selected-card" id="selected-card">
+          <div><span class="selected-label">CURRENT COLOR</span><strong id="selected-hex">#7C5CFF</strong></div>
+          <button id="save-current" class="selected-save" title="Save color" aria-label="Save color">＋</button>
+        </div>
+
+        <button class="pick-button" id="start-picker"><img class="target-icon" src="../assets/dropper-outline.svg" alt=""><strong>Pick color from screen</strong><kbd id="pick-shortcut">⌘ ⇧ P</kbd></button>
+        <div class="zoom-permission" id="zoom-permission" hidden><span>Custom zoom needs Screen Recording permission. Enable it, then reopen Prism Pick.</span><button id="open-screen-settings">Open Settings</button></div>
+
+        <div class="section-title"><h2>Color codes</h2><span>Click to copy</span></div>
+        <div class="code-grid" id="format-list"></div>
+
+        <div class="section-title"><h2>Light to dark</h2><span>Choose a shade for its codes</span></div>
+        <div class="tone-list" id="tone-list"></div>
+
+        <div class="section-title"><h2>Choose a color</h2></div>
+        <div class="manual-row">
+          <label class="color-input" title="Open color picker"><input type="color" id="native-color" value="#7c5cff"><span>Pick</span></label>
+          <div class="hex-field"><span>#</span><input id="hex-input" maxlength="7" spellcheck="false" aria-label="HEX color" value="7C5CFF"><button id="apply-hex">Apply</button></div>
+        </div>
+        <p class="field-error" id="hex-error" role="alert"></p>
+
+        <div class="section-title recent-heading"><h2>Recent picks</h2></div>
+        <div class="recent-list" id="recent-list"></div>
+      </section>
+
+      <section class="view" id="view-palette">
+        <div class="page-heading"><h1>Saved colors</h1><p>Your favorite colors, ready to reuse.</p></div>
+        <button class="secondary-button full-width" id="palette-add">＋ Save current color</button>
+        <div class="palette-grid" id="palette-grid"></div>
+      </section>
+
+      <section class="view" id="view-settings">
+        <div class="page-heading"><h1>Settings</h1><p>Keep color picking one shortcut away.</p></div>
+        <div class="setting-card">
+          <div class="setting-heading"><span class="setting-symbol">⌨</span><div><strong>Global shortcut</strong><p>Works while Prism Pick is in the background.</p></div></div>
+          <div class="shortcut-current"><span>Current shortcut</span><kbd id="shortcut-display">⌘ ⇧ P</kbd></div>
+          <form id="shortcut-form" class="shortcut-form">
+            <label for="shortcut-input">New shortcut</label>
+            <div class="shortcut-entry"><input id="shortcut-input" type="text" readonly spellcheck="false" autocomplete="off" placeholder="Press your shortcut" aria-label="Press your new shortcut"><button type="submit" class="secondary-button">Save</button></div>
+            <p>Click the field, press your keys, then Save. For example, Option+C or F8.</p>
+          </form>
+          <button id="reset-shortcut" class="quiet-button shortcut-reset">Reset to default</button>
+          <p class="settings-feedback" id="shortcut-feedback" role="status"></p>
+        </div>
+        <div class="setting-note"><strong>How to pick</strong><p>Press the shortcut or click “Pick color from screen”, move over a pixel, then click. Press Esc to cancel.</p></div>
+      </section>
+    </main>
+    <div class="toast" id="toast" role="status"></div>
+  </div>
+  <script src="color-ui.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
