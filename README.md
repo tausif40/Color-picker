@@ -18,7 +18,7 @@ A compact macOS and Windows color picker with a global shortcut, a live screen p
    - **Start in menu bar** to skip opening the window at launch (use the shortcut or the menu bar icon).
    - **Show menu bar icon** to bring the icon back after hiding it with **Hide Menu Bar Icon** in the icon's own menu.
 
-Up to **250** colors can be saved; when the list is full, remove one before saving another. **Save current** on the Saved page saves the color shown on the Picker page (the button shows that color). The app remembers your last **24** picks and shows the latest **12** under Recent picks. **Settings → About** shows the app's details (version, platform, shortcut, limits) and, at the end, the developer's contact details.
+Up to **250** colors can be saved; when the list is full, remove one before saving another. **Save current** on the Saved page saves the color shown on the Picker page (the button shows that color). The app remembers your last **24** picks and shows the latest **12** under Recent picks. **Settings → About** shows the app's details (version, platform, shortcut, limits) a **Support** card (**Buy me a coffee** opens the developer's Buy Me a Coffee page), and, at the end, the developer's contact details.
 
 The main window has a fixed size with the **Picker**, **Saved**, **Palette**, and **Settings** tabs at the bottom; everything fits without scrolling (only a long list of saved colors scrolls inside its grid). On macOS it uses the native close and minimize buttons; zoom/full screen is disabled.
 

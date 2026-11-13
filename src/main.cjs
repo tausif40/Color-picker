@@ -12,8 +12,8 @@ const MAX_SAVED_PATTERNS = 100;
 const DEFAULT_PATTERN = { colors: ['#2E4756', '#4F9A8F', '#E2C577', '#E8A66C', '#D8765A'] };
 const MAX_RECENT = 24;
 // Shown in Settings → Developer. Links opened from the app are limited to these.
-const DEVELOPER = { name: 'Tausif', email: 'tausif6040@gmail.com', portfolio: 'https://tausif.info' };
-const ALLOWED_LINKS = new Set([`mailto:${DEVELOPER.email}`, DEVELOPER.portfolio]);
+const DEVELOPER = { name: 'Tausif', email: 'tausif6040@gmail.com', portfolio: 'https://tausif.info', support: 'https://buymeacoffee.com/tausif6040n' };
+const ALLOWED_LINKS = new Set([`mailto:${DEVELOPER.email}`, DEVELOPER.portfolio, DEVELOPER.support]);
 const preload = path.join(__dirname, 'preload.cjs');
 let mainWindow, popupWindow, tray;
 // Picker overlays (one per display) are created ahead of time and kept hidden, and the

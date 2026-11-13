@@ -450,6 +450,7 @@ document.querySelectorAll('[data-pref]').forEach(button => button.addEventListen
 }));
 $('#dev-email').addEventListener('click', () => window.colorPicker.openLink(`mailto:${appState.developer.email}`));
 $('#dev-portfolio').addEventListener('click', () => window.colorPicker.openLink(appState.developer.portfolio));
+$('#support-link').addEventListener('click', () => window.colorPicker.openLink(appState.developer.support));
 $('#native-color').addEventListener('input', event => window.colorPicker.selectColor(event.target.value));
 $('#apply-hex').addEventListener('click', applyHex);
 $('#hex-input').addEventListener('keydown', event => { if (event.key === 'Enter') applyHex(); });
