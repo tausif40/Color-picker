@@ -65,4 +65,4 @@ The Windows installer command is best run on Windows; on an Apple Silicon Mac it
 - `src/index.html`, `src/app.js`, `src/styles.css`: main workspace.
 - `assets/color_picker_icon.svg`: cropped app icon artwork used in the app and for packaged icons.
 - `assets/dropper-outline.svg`: cropped dropper artwork used by the pick button and tray.
-- `scripts/generate-icons.cjs`: renders the SVGs into macOS, Windows, and tray assets (`trayTemplate.png` and `@2x` for the 18 pt macOS menu bar icon).
+- `scripts/generate-icons.cjs`: renders the SVGs in sRGB into `app.icns` (16–1024 px, on Apple's icon grid with a 100 px margin at 1024 so it matches other Dock icons), a multi-size `app.ico` (16–256 px), and the tray assets (`trayTemplate.png` and `@2x` for the 18 pt macOS menu bar icon). `assets/app.png` (the window icon) is kept as checked in and only generated when missing.
